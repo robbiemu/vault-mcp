@@ -22,7 +22,7 @@ def mock_config(tmp_path):
     return Config(
         paths=PathsConfig(vault_dir=str(tmp_path)),
         prefix_filter=PrefixFilterConfig(allowed_prefixes=["Test"]),
-        indexing=IndexingConfig(quality_threshold=0.5),
+        indexing=IndexingConfig(quality_threshold=0.5, enable_quality_filter=True),
         watcher=WatcherConfig(enabled=True, debounce_seconds=1),
     )
 

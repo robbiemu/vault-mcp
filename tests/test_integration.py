@@ -26,7 +26,7 @@ def integration_config(temp_vault_dir):
         indexing=IndexingConfig(
             chunk_size=200,
             chunk_overlap=50,
-            quality_threshold=0.3  # Lower threshold for testing
+            quality_threshold=0.3,  # Lower threshold for testing
         ),
         watcher=WatcherConfig(enabled=False),  # Disable for integration tests
     )
@@ -35,7 +35,9 @@ def integration_config(temp_vault_dir):
 @pytest.fixture
 def client():
     """Create a test client for the FastAPI app."""
-    return TestClient(app)
+    # Create TestClient with lifespan events enabled
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def test_full_document_workflow(client, sample_markdown_files, integration_config):
@@ -46,17 +48,16 @@ def test_full_document_workflow(client, sample_markdown_files, integration_confi
     # Initialize components
     processor = DocumentProcessor(
         chunk_size=integration_config.indexing.chunk_size,
-        chunk_overlap=integration_config.indexing.chunk_overlap
+        chunk_overlap=integration_config.indexing.chunk_overlap,
     )
 
     embedding_config = EmbeddingModelConfig(
-        provider="sentence_transformers",
-        model_name="all-MiniLM-L6-v2"
+        provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
     )
     vector_store = VectorStore(
         embedding_config=embedding_config,
         persist_directory="./test_chroma_integration",
-        collection_name="integration_test"
+        collection_name="integration_test",
     )
 
     try:
@@ -65,7 +66,8 @@ def test_full_document_workflow(client, sample_markdown_files, integration_confi
 
         # Filter by quality threshold
         quality_chunks = [
-            chunk for chunk in chunks
+            chunk
+            for chunk in chunks
             if chunk["score"] >= integration_config.indexing.quality_threshold
         ]
 
@@ -112,10 +114,7 @@ def test_api_endpoints_basic(client):
 
 def test_query_endpoint(client):
     """Test query endpoint with proper request format."""
-    query_data = {
-        "query": "test search query",
-        "limit": 5
-    }
+    query_data = {"query": "test search query", "limit": 5}
 
     response = client.post("/mcp/query", json=query_data)
     assert response.status_code == 200
@@ -177,17 +176,16 @@ The system should be able to find this content when searching for relevant terms
     # Initialize components
     processor = DocumentProcessor(
         chunk_size=integration_config.indexing.chunk_size,
-        chunk_overlap=integration_config.indexing.chunk_overlap
+        chunk_overlap=integration_config.indexing.chunk_overlap,
     )
 
     embedding_config = EmbeddingModelConfig(
-        provider="sentence_transformers",
-        model_name="all-MiniLM-L6-v2"
+        provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
     )
     vector_store = VectorStore(
         embedding_config=embedding_config,
         persist_directory="./test_pipeline_chroma",
-        collection_name="pipeline_test"
+        collection_name="pipeline_test",
     )
 
     try:
@@ -200,7 +198,8 @@ The system should be able to find this content when searching for relevant terms
 
         # Filter and add chunks
         quality_chunks = [
-            chunk for chunk in chunks
+            chunk
+            for chunk in chunks
             if chunk["score"] >= integration_config.indexing.quality_threshold
         ]
 

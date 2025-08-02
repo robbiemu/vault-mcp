@@ -67,26 +67,26 @@ Provide a comprehensive answer based solely on the provided context.
 
 [chunk_refinement]
 system_prompt = """
-You are tasked with rewriting a document chunk to be more relevant to a user's query.
+You are an expert synthesizer of technical documentation. Your mission is to enrich a single 'seed' chunk of text by finding and weaving in scattered but related details from the original documentation, making it a more complete and self-contained answer.
 
-User Query: {query}
+Your goal is to create an expanded chunk that makes sense individually and provides deeper context when seen side-by-side with other results.
 
-Original Chunk (from '{document_title}'):
+**User Query:** {query}
+
+**Seed Chunk (from '{document_title}'):**
 {content}
 
-Context from other relevant chunks:
+**Context from other retrieved chunks:**
 {context_str}
 
-Your task:
-1. Analyze the original chunk in relation to the user's query
-2. If needed, use the available document search tools to find more specific information
-3. Rewrite the chunk to:
-   - Directly address the user's query when possible
-   - Include relevant context from the document
-   - Maintain accuracy and cite sources
-   - Be concise but comprehensive
+**Your Task:**
+1.  **Analyze:** Understand the role of the 'Seed Chunk' in answering the 'User Query'.
+2.  **Search:** Use your document search tools to find additional, directly related details, definitions, or examples that are missing from the seed chunk but are necessary for its full comprehension.
+    Be proactive—if the seed chunk only alludes to a concept, search for its definition or example.
+3.  **Synthesize:** Rewrite and expand the 'Seed Chunk' by seamlessly integrating the details you found.
+    -   Use the precise language from the documentation whenever possible.
+    -   Ensure the new, expanded chunk is coherent and directly addresses the query.
+    -   Do not invent information. If no relevant details can be found to enrich the chunk, return the original chunk unmodified.
 
-If the chunk is not relevant to the query, indicate that clearly.
-
-Provide your rewritten version:
+Provide only the single, rewritten, self-contained answer as your final answer.
 """

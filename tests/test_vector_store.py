@@ -1,6 +1,5 @@
 """Tests for vector store functionality."""
 
-
 from components.mcp_server.models import ChunkMetadata
 from components.vector_store.vector_store import VectorStore
 from vault_mcp.config import EmbeddingModelConfig
@@ -9,13 +8,12 @@ from vault_mcp.config import EmbeddingModelConfig
 def test_vector_store_initialization(tmp_path):
     """Test vector store initialization."""
     embedding_config = EmbeddingModelConfig(
-        provider="sentence_transformers",
-        model_name="all-MiniLM-L6-v2"
+        provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
     )
     vector_store = VectorStore(
         embedding_config=embedding_config,
         persist_directory=str(tmp_path / "test_chroma"),
-        collection_name="test_collection"
+        collection_name="test_collection",
     )
 
     assert vector_store.collection_name == "test_collection"
@@ -30,14 +28,14 @@ def test_add_chunks(temp_vector_store):
             "text": "This is the first test chunk about game mechanics.",
             "file_path": "test1.md",
             "chunk_id": "test1.md|0",
-            "score": 0.8
+            "score": 0.8,
         },
         {
             "text": "This is the second test chunk about game economy.",
             "file_path": "test2.md",
             "chunk_id": "test2.md|0",
-            "score": 0.9
-        }
+            "score": 0.9,
+        },
     ]
 
     temp_vector_store.add_chunks(chunks)
@@ -63,7 +61,7 @@ def test_search_chunks(temp_vector_store):
             ),
             "file_path": "mechanics.md",
             "chunk_id": "mechanics.md|0",
-            "score": 0.85
+            "score": 0.85,
         },
         {
             "text": (
@@ -71,14 +69,14 @@ def test_search_chunks(temp_vector_store):
             ),
             "file_path": "economy.md",
             "chunk_id": "economy.md|0",
-            "score": 0.75
+            "score": 0.75,
         },
         {
             "text": "Combat mechanics involve strategic positioning and unit types.",
             "file_path": "combat.md",
             "chunk_id": "combat.md|0",
-            "score": 0.9
-        }
+            "score": 0.9,
+        },
     ]
 
     temp_vector_store.add_chunks(chunks)
@@ -101,23 +99,21 @@ def test_search_with_quality_threshold(temp_vector_store):
             "text": "High quality content about advanced game mechanics.",
             "file_path": "advanced.md",
             "chunk_id": "advanced.md|0",
-            "score": 0.9
+            "score": 0.9,
         },
         {
             "text": "Low quality content.",
             "file_path": "basic.md",
             "chunk_id": "basic.md|0",
-            "score": 0.3
-        }
+            "score": 0.3,
+        },
     ]
 
     temp_vector_store.add_chunks(chunks)
 
     # Search with high quality threshold
     high_quality_results = temp_vector_store.search(
-        "game mechanics",
-        limit=5,
-        quality_threshold=0.8
+        "game mechanics", limit=5, quality_threshold=0.8
     )
 
     # Should only return high quality chunks
@@ -131,20 +127,20 @@ def test_remove_file_chunks(temp_vector_store):
             "text": "Content from file 1.",
             "file_path": "file1.md",
             "chunk_id": "file1.md|0",
-            "score": 0.8
+            "score": 0.8,
         },
         {
             "text": "More content from file 1.",
             "file_path": "file1.md",
             "chunk_id": "file1.md|1",
-            "score": 0.7
+            "score": 0.7,
         },
         {
             "text": "Content from file 2.",
             "file_path": "file2.md",
             "chunk_id": "file2.md|0",
-            "score": 0.9
-        }
+            "score": 0.9,
+        },
     ]
 
     temp_vector_store.add_chunks(chunks)
@@ -167,20 +163,20 @@ def test_get_all_file_paths(temp_vector_store):
             "text": "Content A",
             "file_path": "fileA.md",
             "chunk_id": "fileA.md|0",
-            "score": 0.8
+            "score": 0.8,
         },
         {
             "text": "Content B",
             "file_path": "fileB.md",
             "chunk_id": "fileB.md|0",
-            "score": 0.8
+            "score": 0.8,
         },
         {
             "text": "More content A",
             "file_path": "fileA.md",
             "chunk_id": "fileA.md|1",
-            "score": 0.7
-        }
+            "score": 0.7,
+        },
     ]
 
     temp_vector_store.add_chunks(chunks)
@@ -199,7 +195,7 @@ def test_clear_all(temp_vector_store):
             "text": "Test content",
             "file_path": "test.md",
             "chunk_id": "test.md|0",
-            "score": 0.8
+            "score": 0.8,
         }
     ]
 

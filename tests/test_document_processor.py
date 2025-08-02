@@ -1,6 +1,5 @@
 """Tests for document processing and chunking."""
 
-
 from vault_mcp.document_processor import DocumentProcessor
 
 

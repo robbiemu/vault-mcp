@@ -37,7 +37,8 @@ def sample_markdown_files(temp_vault_dir: Path) -> dict[str, Path]:
 
     # Create a file that matches prefix filter
     matching_file = temp_vault_dir / "Resource Balance Game - Overview.md"
-    matching_file.write_text("""# Resource Balance Game Overview
+    matching_file.write_text(
+        """# Resource Balance Game Overview
 
 This is a comprehensive overview of the resource balance game mechanics.
 
@@ -52,15 +53,18 @@ The game uses a dynamic resource system where players must balance:
 
 The economic system is based on supply and demand principles.
 Resources become more valuable when scarce and less valuable when abundant.
-""")
+"""
+    )
     files["matching"] = matching_file
 
     # Create a file that doesn't match prefix filter
     non_matching_file = temp_vault_dir / "Personal Notes.md"
-    non_matching_file.write_text("""# Personal Notes
+    non_matching_file.write_text(
+        """# Personal Notes
 
 These are my personal notes that shouldn't be indexed.
-""")
+"""
+    )
     files["non_matching"] = non_matching_file
 
     # Create an empty file
@@ -78,12 +82,10 @@ def test_config(temp_vault_dir: Path) -> Config:
         paths=PathsConfig(vault_dir=str(temp_vault_dir)),
         prefix_filter=PrefixFilterConfig(allowed_prefixes=["Resource Balance Game"]),
         indexing=IndexingConfig(
-            chunk_size=256,
-            chunk_overlap=32,
-            quality_threshold=0.5
+            chunk_size=256, chunk_overlap=32, quality_threshold=0.5
         ),
         watcher=WatcherConfig(enabled=False),  # Disable for tests
-        server=ServerConfig(host="127.0.0.1", port=8000)
+        server=ServerConfig(host="127.0.0.1", port=8000),
     )
 
 
@@ -97,8 +99,7 @@ def document_processor() -> DocumentProcessor:
 def test_embedding_config() -> EmbeddingModelConfig:
     """Create a test embedding configuration."""
     return EmbeddingModelConfig(
-        provider="sentence_transformers",
-        model_name="all-MiniLM-L6-v2"
+        provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
     )
 
 
@@ -110,7 +111,7 @@ def temp_vector_store(
     vector_store = VectorStore(
         embedding_config=test_embedding_config,
         persist_directory=str(tmp_path / "test_chroma"),
-        collection_name="test_vault_docs"
+        collection_name="test_vault_docs",
     )
     try:
         yield vector_store

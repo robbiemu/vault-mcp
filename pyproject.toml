@@ -77,6 +77,7 @@ skips = ["B101"]
 testpaths = ["tests", "components/*/tests"]
 python_files = ["test_*.py"]
 addopts = "--cov=vault_mcp --cov=components --cov-report=term-missing"
+asyncio_default_fixture_loop_scope = "function"
 
 [dependency-groups]
 dev = [

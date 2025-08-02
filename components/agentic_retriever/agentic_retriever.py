@@ -226,15 +226,8 @@ class ChunkRewriterPostprocessor(BaseNodePostprocessor):
             return nodes
 
         try:
-            # Run async postprocessing
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                return loop.run_until_complete(
-                    self._apostprocess_nodes(nodes, query_bundle)
-                )
-            finally:
-                loop.close()
+            # Run async postprocessing using modern asyncio.run()
+            return asyncio.run(self._apostprocess_nodes(nodes, query_bundle))
         except Exception as e:
             logger.error(f"Error in postprocessing: {e}")
             return nodes

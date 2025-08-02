@@ -102,58 +102,49 @@ class ChunkRewriteAgent:
     def _get_refinement_prompt(
         self, query: str, document_title: str, content: str, context_str: str
     ) -> str:
-        """Load and format the chunk refinement prompt from configuration.
-
-        Args:
-            query: The user's query
-            document_title: Title of the document
-            content: The chunk content
-            context_str: Context from other chunks
-
-        Returns:
-            The formatted prompt string
-        """
+        """Load and format the chunk refinement prompt from the global config."""
         try:
-            # Use prompts from the config object
-            chunk_refinement_prompt = self.config.prompts.get(
-                "chunk_refinement", {}
-            ).get("system_prompt")
+            # Get prompt from the already-loaded config object
+            chunk_refinement_prompt = str(
+                self.config.prompts["chunk_refinement"]["system_prompt"]
+            )
 
-            if chunk_refinement_prompt:
-                return str(
-                    chunk_refinement_prompt.format(
-                        query=query,
-                        document_title=document_title,
-                        content=content,
-                        context_str=context_str,
-                    )
-                )
-            else:
-                raise KeyError("chunk_refinement.system_prompt not found in config")
+            return chunk_refinement_prompt.format(
+                query=query,
+                document_title=document_title,
+                content=content,
+                context_str=context_str,
+            )
 
-        except Exception as e:
+        except (KeyError, TypeError) as e:
             logger.warning(
                 f"Failed to load chunk refinement prompt from config: {e}. "
                 "Using fallback."
             )
             # Fallback prompt if config loading fails
-            return (
-                "You are tasked with rewriting a document chunk to be more "
-                f"relevant to a user's query.\n\nUser Query: {query}\n\n"
-                f"Original Chunk (from '{document_title}'):\n{content}\n\n"
-                f"Context from other relevant chunks:\n{context_str}\n\n"
-                "Your task:\n"
-                "1. Analyze the original chunk in relation to the user's query\n"
-                "2. If needed, use the available document search tools to find "
-                "more specific information\n"
-                "3. Rewrite the chunk to:\n"
-                "   - Directly address the user's query when possible\n"
-                "   - Include relevant context from the document\n"
-                "   - Maintain accuracy and cite sources\n"
-                "   - Be concise but comprehensive\n\n"
-                "If the chunk is not relevant to the query, indicate that clearly.\n\n"
-                "Provide your rewritten version:"
-            )
+            return f"""You are tasked with rewriting a document chunk to be more \
+relevant to a user's query.
+
+User Query: {query}
+
+Original Chunk (from '{document_title}'):
+{content}
+
+Context from other relevant chunks:
+{context_str}
+
+Your task:
+1. Analyze the original chunk in relation to the user's query
+2. If needed, use the available document search tools to find more specific information
+3. Rewrite the chunk to:
+   - Directly address the user's query when possible
+   - Include relevant context from the document
+   - Maintain accuracy and cite sources
+   - Be concise but comprehensive
+
+If the chunk is not relevant to the query, indicate that clearly.
+
+Provide your rewritten version:"""
 
     async def rewrite_chunk(self, chunk: NodeWithScore) -> str:
         """Rewrite a chunk to be more relevant and contextual.

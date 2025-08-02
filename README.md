@@ -1,5 +1,7 @@
 # 🧾 Vault MCP - Obsidian Documentation Server
 
+**Version 0.2.1**
+
 A **Model Context Protocol (MCP)** compliant server that indexes, searches, and serves Obsidian vault documents with **semantic search (RAG)**, **live synchronization**, and **quality-based chunk filtering**.
 
 ## ✨ Features
@@ -12,6 +14,20 @@ A **Model Context Protocol (MCP)** compliant server that indexes, searches, and 
 - 🔌 **MCP Compliant**: Follows Model Context Protocol standards
 - 🚀 **FastAPI Backend**: RESTful API with automatic documentation
 - 📝 **Markdown Processing**: Obsidian-friendly markdown parsing
+
+## 📚 Table of Contents
+
+- [🏗️ Architecture](#%EF%B8%8F-architecture)
+- [🚀 Quick Start](#-quick-start)
+- [📋 API Endpoints](#-api-endpoints)
+- [⚙️ Configuration Options](#%EF%B8%8F-configuration-options)
+- [🔧 Development](#-development)
+- [🧠 How It Works](#-how-it-works)
+- [🎯 Use Cases](#-use-cases)
+- [🔍 Quality Scoring](#-quality-scoring)
+- [🚨 Troubleshooting](#-troubleshooting)
+- [📊 Performance](#-performance)
+- [🤝 Contributing](#-contributing)
 
 ## 🏗️ Architecture
 
@@ -421,7 +437,6 @@ vault-mcp/
 │   └── plan.md              # Technical specification
 ├── config/
 │   ├── app.toml             # Main application configuration
-│   ├── templates.yaml       # Response templates
 │   └── prompts.toml         # AI/LLM prompts
 ├── pyproject.toml           # Project metadata and dependencies
 └── README.md                # This file

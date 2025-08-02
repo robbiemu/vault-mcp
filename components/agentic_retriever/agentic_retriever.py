@@ -79,6 +79,7 @@ class ChunkRewriteAgent:
         query: str,
         all_chunks: List[NodeWithScore],
         doc_tools: List[FunctionTool],
+        config: Config,
     ):
         """Initialize the chunk rewrite agent.
 
@@ -87,11 +88,13 @@ class ChunkRewriteAgent:
             query: The user's original query
             all_chunks: All retrieved chunks for context
             doc_tools: Available document search tools
+            config: Configuration object containing prompts
         """
         self.llm = llm
         self.query = query
         self.all_chunks = all_chunks
         self.doc_tools = doc_tools
+        self.config = config
 
         # Create the agent with tools
         self.agent = ReActAgent(tools=doc_tools, llm=llm, verbose=True)  # type: ignore[arg-type]
@@ -111,33 +114,22 @@ class ChunkRewriteAgent:
             The formatted prompt string
         """
         try:
-            from pathlib import Path
+            # Use prompts from the config object
+            chunk_refinement_prompt = self.config.prompts.get(
+                "chunk_refinement", {}
+            ).get("system_prompt")
 
-            import toml
-
-            # Use proper path resolution
-            config_path = Path("config/prompts.toml")
-            if not config_path.exists():
-                # Fallback for different working directories
-                config_path = (
-                    Path(__file__).parent.parent.parent / "config" / "prompts.toml"
+            if chunk_refinement_prompt:
+                return str(
+                    chunk_refinement_prompt.format(
+                        query=query,
+                        document_title=document_title,
+                        content=content,
+                        context_str=context_str,
+                    )
                 )
-
-            with open(config_path, "r") as prompts_file:
-                prompts_config = toml.load(prompts_file)
-
-            chunk_refinement_prompt = prompts_config["chunk_refinement"][
-                "system_prompt"
-            ]
-
-            return str(
-                chunk_refinement_prompt.format(
-                    query=query,
-                    document_title=document_title,
-                    content=content,
-                    context_str=context_str,
-                )
-            )
+            else:
+                raise KeyError("chunk_refinement.system_prompt not found in config")
 
         except Exception as e:
             logger.warning(
@@ -210,17 +202,21 @@ class ChunkRewriteAgent:
 class ChunkRewriterPostprocessor(BaseNodePostprocessor):
     """Postprocessor that orchestrates concurrent chunk rewriting using agents."""
 
-    def __init__(self, llm: LLM, index: VectorStoreIndex, max_workers: int = 3):
+    def __init__(
+        self, llm: LLM, index: VectorStoreIndex, config: Config, max_workers: int = 3
+    ):
         """Initialize the chunk rewriter postprocessor.
 
         Args:
             llm: The language model to use for rewriting
             index: The vector store index for document searches
+            config: Configuration object containing prompts
             max_workers: Maximum number of concurrent rewrite tasks
         """
         super().__init__()
         self._llm = llm
         self._index = index
+        self._config = config
         self._max_workers = max_workers
 
     def _postprocess_nodes(
@@ -296,7 +292,9 @@ class ChunkRewriterPostprocessor(BaseNodePostprocessor):
                     relevant_tools = [doc_tools[doc_id]] if doc_id in doc_tools else []
 
                     # Create agent and rewrite
-                    agent = ChunkRewriteAgent(self._llm, query, nodes, relevant_tools)
+                    agent = ChunkRewriteAgent(
+                        self._llm, query, nodes, relevant_tools, self._config
+                    )
                     rewritten_content = await agent.rewrite_chunk(chunk)
 
                     # Create new node with rewritten content
@@ -377,7 +375,7 @@ def create_agentic_query_engine(
 
         # Create postprocessor for agentic rewriting
         postprocessor = ChunkRewriterPostprocessor(
-            llm=llm, index=index, max_workers=max_workers
+            llm=llm, index=index, config=config, max_workers=max_workers
         )
 
         # Create query engine with postprocessor

@@ -49,14 +49,10 @@ def test_config_file_not_found():
         Config.load_from_file("/nonexistent/config.toml")
 
 
-def test_load_config_with_default():
-    """Test load_config function with default fallback."""
-    config = load_config("/nonexistent/config.toml")
-
-    # Should return default config when file doesn't exist
-    assert config.paths.vault_dir == "./vault"
-    assert config.prefix_filter.allowed_prefixes == []
-    assert config.indexing.chunk_size == 512
+def test_load_config_with_nonexistent_app_config():
+    """Test load_config function raises error when app config doesn't exist."""
+    with pytest.raises(FileNotFoundError):
+        load_config(app_config_path="/nonexistent/config.toml")
 
 
 def test_get_vault_path(tmp_path: Path):

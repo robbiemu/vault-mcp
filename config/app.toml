@@ -59,7 +59,7 @@ temperature = 0.5
 max_tokens = 1024
 
 # ===== EXAMPLE CONFIGURATIONS =====
-# Copy any of these to config/app.local.toml to override the defaults:
+# Copy any of these to your config's app.toml to override the defaults:
 
 # OpenAI GPT-4o Mini:
 # [generation_model]

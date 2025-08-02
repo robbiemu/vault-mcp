@@ -27,7 +27,7 @@ def test_config_load_from_file(tmp_path: Path):
         "prefix_filter": {"allowed_prefixes": ["Resource Balance Game"]},
         "indexing": {"chunk_size": 1024, "quality_threshold": 0.8},
         "watcher": {"enabled": False},
-        "server": {"port": 9000}
+        "server": {"port": 9000},
     }
 
     with open(config_file, "w") as f:
@@ -57,9 +57,7 @@ def test_load_config_with_nonexistent_app_config():
 
 def test_get_vault_path(tmp_path: Path):
     """Test vault path resolution."""
-    config = Config(
-        paths=PathsConfig(vault_dir=str(tmp_path / "test_vault"))
-    )
+    config = Config(paths=PathsConfig(vault_dir=str(tmp_path / "test_vault")))
 
     vault_path = config.get_vault_path()
     assert isinstance(vault_path, Path)
@@ -73,7 +71,7 @@ def test_should_include_file():
         paths=PathsConfig(vault_dir="/test"),
         prefix_filter=PrefixFilterConfig(
             allowed_prefixes=["Resource Balance Game", "Project Doc"]
-        )
+        ),
     )
 
     assert config_with_filter.should_include_file("Resource Balance Game - Overview.md")
@@ -83,7 +81,7 @@ def test_should_include_file():
     # Config without prefix filters (should include all)
     config_without_filter = Config(
         paths=PathsConfig(vault_dir="/test"),
-        prefix_filter=PrefixFilterConfig(allowed_prefixes=[])
+        prefix_filter=PrefixFilterConfig(allowed_prefixes=[]),
     )
 
     assert config_without_filter.should_include_file("Any File.md")

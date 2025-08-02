@@ -126,11 +126,14 @@ class VaultEventHandler(FileSystemEventHandler):
                 _, chunks = self.processor.process_file(file_path_obj)
                 if chunks:
                     # Filter chunks by quality threshold
-                    quality_chunks = [
-                        chunk
-                        for chunk in chunks
-                        if chunk["score"] >= self.config.indexing.quality_threshold
-                    ]
+                    if self.config.indexing.enable_quality_filter:
+                        quality_chunks = [
+                            chunk
+                            for chunk in chunks
+                            if chunk["score"] >= self.config.indexing.quality_threshold
+                        ]
+                    else:
+                        quality_chunks = chunks
 
                     if quality_chunks:
                         self.vector_store.add_chunks(quality_chunks)

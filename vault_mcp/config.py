@@ -14,6 +14,10 @@ class PathsConfig(BaseModel):
     """Configuration for file paths."""
 
     vault_dir: str = Field(..., description="Absolute path to the Obsidian vault")
+    database_dir: str = Field(
+        default="./chroma_db",
+        description="Directory to store the ChromaDB vector database",
+    )
 
 
 class PrefixFilterConfig(BaseModel):
@@ -31,6 +35,9 @@ class IndexingConfig(BaseModel):
     chunk_overlap: int = Field(default=64, description="Overlap between chunks")
     quality_threshold: float = Field(
         default=0.75, description="Minimum quality score for chunks"
+    )
+    enable_quality_filter: bool = Field(
+        default=False, description="Enable quality filtering of chunks"
     )
 
 

@@ -9,7 +9,9 @@ from ..main import app
 @pytest.fixture
 def client():
     """Create a test client for the MCP server."""
-    return TestClient(app)
+    # Create TestClient with lifespan events enabled
+    with TestClient(app) as test_client:
+        yield test_client
 
 
 def test_mcp_info_endpoint(client):

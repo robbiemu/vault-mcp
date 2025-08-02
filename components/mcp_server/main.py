@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 config = load_config()
 
 # Initialize global components
-vector_store = VectorStore(embedding_config=config.embedding_model)
+vector_store: VectorStore | None = None  # Will be initialized in lifespan
 processor = DocumentProcessor(
     chunk_size=config.indexing.chunk_size, chunk_overlap=config.indexing.chunk_overlap
 )
@@ -44,9 +44,15 @@ query_engine = None
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> Any:
+async def lifespan(_app: FastAPI) -> Any:
     """Manage application lifespan events."""
-    global file_watcher, query_engine
+    global vector_store, file_watcher, query_engine
+
+    # Initialize the VectorStore here, using the final config
+    vector_store = VectorStore(
+        embedding_config=config.embedding_model,
+        persist_directory=config.paths.database_dir,
+    )
 
     # Startup: Initialize file watcher and perform initial indexing
     logger.info("Starting Vault MCP Server")
@@ -79,6 +85,15 @@ async def initial_indexing() -> None:
     """Perform initial indexing of the vault."""
     logger.info("Starting initial vault indexing")
 
+    # Ensure vector_store is initialized
+    if vector_store is None:
+        raise RuntimeError(
+            (
+                "Vector store not initialized. This should not happen "
+                "during normal startup."
+            )
+        )
+
     vault_path = config.get_vault_path()
     if not vault_path.exists():
         logger.warning(f"Vault directory does not exist: {vault_path}")
@@ -91,11 +106,14 @@ async def initial_indexing() -> None:
                 _, chunks = processor.process_file(file_path)
 
                 # Filter chunks by quality threshold
-                quality_chunks = [
-                    chunk
-                    for chunk in chunks
-                    if chunk["score"] >= config.indexing.quality_threshold
-                ]
+                if config.indexing.enable_quality_filter:
+                    quality_chunks = [
+                        chunk
+                        for chunk in chunks
+                        if chunk["score"] >= config.indexing.quality_threshold
+                    ]
+                else:
+                    quality_chunks = chunks
 
                 if quality_chunks:
                     vector_store.add_chunks(quality_chunks)
@@ -110,6 +128,15 @@ async def initial_indexing() -> None:
 async def setup_llamaindex() -> None:
     """Initialize LlamaIndex components."""
     global query_engine
+
+    # Ensure vector_store is initialized
+    if vector_store is None:
+        raise RuntimeError(
+            (
+                "Vector store not initialized. This should not happen "
+                "during normal startup."
+            )
+        )
 
     query_engine = create_agentic_query_engine(
         config=config, vector_store=vector_store, similarity_top_k=10, max_workers=3
@@ -127,6 +154,9 @@ async def setup_llamaindex() -> None:
 @app.get("/mcp/info", response_model=MCPInfoResponse)
 def get_mcp_info() -> MCPInfoResponse:
     """Provide info on server capabilities and configuration."""
+    if vector_store is None:
+        raise HTTPException(status_code=503, detail="Server is starting up")
+
     return MCPInfoResponse(
         mcp_version="1.0",
         capabilities=[
@@ -151,15 +181,22 @@ def get_mcp_info() -> MCPInfoResponse:
 @app.get("/mcp/files", response_model=FileListResponse)
 def list_files() -> FileListResponse:
     """List all indexed files in the vector store."""
+    if vector_store is None:
+        raise HTTPException(status_code=503, detail="Server is starting up")
+
     files = vector_store.get_all_file_paths()
     return FileListResponse(files=files, total_count=len(files))
 
 
 @app.get("/mcp/document", response_model=DocumentResponse)
 def get_document(
-    file_path: str = Query(..., description="Path to the document")
+    file_path: str = Query(..., description="Path to the document"),
 ) -> DocumentResponse:
     """Retrieve full document content by file_path."""
+
+    # Check if vector store is available
+    if vector_store is None:
+        raise HTTPException(status_code=503, detail="Server is starting up")
 
     # Check if the file is in the vector store
     if file_path not in vector_store.get_all_file_paths():
@@ -184,6 +221,9 @@ def get_document(
 def query_documents(request: QueryRequest) -> QueryResponse:
     """Perform agentic RAG query using LlamaIndex."""
     global query_engine
+
+    if vector_store is None:
+        raise HTTPException(status_code=503, detail="Server is starting up")
 
     if query_engine is None:
         # Fallback to basic retrieval if LlamaIndex setup failed
@@ -234,6 +274,9 @@ def query_documents(request: QueryRequest) -> QueryResponse:
 @app.post("/mcp/reindex", response_model=ReindexResponse)
 async def reindex_documents() -> ReindexResponse:
     """Force a full reindex of documents from the vault."""
+    if vector_store is None:
+        raise HTTPException(status_code=503, detail="Server is starting up")
+
     # Clear the existing vector store
     vector_store.clear_all()
 
@@ -259,6 +302,10 @@ def main() -> None:
         description="MCP-compliant Obsidian documentation server."
     )
     parser.add_argument(
+        "--database-dir",
+        help="Override the storage directory for the vector database.",
+    )
+    parser.add_argument(
         "-c",
         "--config",
         help="Path to the config folder to use for all config files.",
@@ -282,6 +329,10 @@ def main() -> None:
         app_config_path=args.app_config,
         prompts_config_path=args.prompts_config,
     )
+
+    if args.database_dir:
+        config.paths.database_dir = args.database_dir
+        logger.info(f"Overriding database directory with: {config.paths.database_dir}")
 
     logger.info(f"Starting server on {config.server.host}:{config.server.port}")
 

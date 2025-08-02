@@ -24,7 +24,6 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     """Response model for semantic search queries."""
 
-    answer: str = Field(..., description="Generated answer based on retrieved context")
     sources: List[ChunkMetadata] = Field(
         default_factory=list, description="Source chunks used for the answer"
     )

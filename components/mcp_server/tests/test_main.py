@@ -53,7 +53,7 @@ def test_query_endpoint(client):
     assert response.status_code == 200
 
     data = response.json()
-    assert "answer" in data
+    # Updated to match actual QueryResponse structure
     assert "sources" in data
     assert isinstance(data["sources"], list)
 

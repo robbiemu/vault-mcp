@@ -3,11 +3,17 @@
 
 from components.mcp_server.models import ChunkMetadata
 from components.vector_store.vector_store import VectorStore
+from vault_mcp.config import EmbeddingModelConfig
 
 
 def test_vector_store_initialization(tmp_path):
     """Test vector store initialization."""
+    embedding_config = EmbeddingModelConfig(
+        provider="sentence_transformers",
+        model_name="all-MiniLM-L6-v2"
+    )
     vector_store = VectorStore(
+        embedding_config=embedding_config,
         persist_directory=str(tmp_path / "test_chroma"),
         collection_name="test_collection"
     )

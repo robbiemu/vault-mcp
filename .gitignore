@@ -238,3 +238,6 @@ chroma.sqlite3
 # .aiderCode.md
 # GEMINI.MD
 .warp.md
+
+project_bundle.zip
+*.task.md

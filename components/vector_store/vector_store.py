@@ -2,12 +2,13 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Union
+from typing import Any, Dict, List, Mapping, Union, cast
 
 import chromadb
 from chromadb.config import Settings
 from components.mcp_server.models import ChunkMetadata
-from sentence_transformers import SentenceTransformer
+from vault_mcp.config import EmbeddingModelConfig
+from vault_mcp.embedding_factory import EmbeddingModel, create_embedding_model
 
 logger = logging.getLogger(__name__)
 
@@ -17,17 +18,20 @@ class VectorStore:
 
     def __init__(
         self,
+        embedding_config: EmbeddingModelConfig,
         persist_directory: str = "./chroma_db",
         collection_name: str = "vault_docs",
     ):
         """Initialize the vector store.
 
         Args:
+            embedding_config: Configuration for the embedding model
             persist_directory: Directory to persist the ChromaDB data
             collection_name: Name of the ChromaDB collection
         """
         self.persist_directory = Path(persist_directory)
         self.collection_name = collection_name
+        self.embedding_config = embedding_config
 
         # Ensure the persist directory exists
         self.persist_directory.mkdir(parents=True, exist_ok=True)
@@ -38,10 +42,15 @@ class VectorStore:
             settings=Settings(anonymized_telemetry=False, allow_reset=True),
         )
 
-        # Initialize the sentence transformer model
+        # Initialize the embedding model using the factory
         try:
-            self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
-            logger.info("Loaded embedding model: all-MiniLM-L6-v2")
+            self.embedding_model = cast(
+                EmbeddingModel, create_embedding_model(embedding_config)
+            )
+            logger.info(
+                f"Initialized embedding model: "
+                f"{embedding_config.provider}/{embedding_config.model_name}"
+            )
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}")
             raise
@@ -84,11 +93,11 @@ class VectorStore:
 
         try:
             # Generate embeddings
-            embeddings = self.embedding_model.encode(texts).tolist()
+            embeddings = self.embedding_model.encode(texts)
 
             # Add to ChromaDB
             self.collection.add(
-                embeddings=embeddings,
+                embeddings=embeddings,  # type: ignore[arg-type]
                 documents=texts,
                 metadatas=metadatas,
                 ids=chunk_ids,
@@ -115,11 +124,11 @@ class VectorStore:
         """
         try:
             # Generate query embedding
-            query_embedding = self.embedding_model.encode([query]).tolist()[0]
+            query_embedding = self.embedding_model.encode([query])[0]
 
             # Search the collection
             results = self.collection.query(
-                query_embeddings=[query_embedding],
+                query_embeddings=[query_embedding],  # type: ignore[arg-type]
                 n_results=limit * 2,  # Get more results to filter by quality
                 include=["documents", "metadatas", "distances"],
             )
@@ -202,11 +211,11 @@ class VectorStore:
             results = self.collection.get(include=["metadatas"])
 
             if results["metadatas"]:
-                file_paths = set(
-                    metadata["file_path"]
+                file_paths = {
+                    str(metadata["file_path"])
                     for metadata in results["metadatas"]
                     if isinstance(metadata.get("file_path"), str)
-                )
+                }
                 return sorted(list(file_paths))
 
             return []

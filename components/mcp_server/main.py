@@ -5,13 +5,16 @@ import os
 from contextlib import asynccontextmanager
 from typing import Any
 
+from components.agentic_retriever import create_agentic_query_engine
 from components.file_watcher.file_watcher import VaultWatcher
 from components.vector_store.vector_store import VectorStore
 from fastapi import FastAPI, HTTPException, Query
+from llama_index.core.schema import MetadataMode
 from vault_mcp.config import load_config
 from vault_mcp.document_processor import DocumentProcessor
 
 from .models import (
+    ChunkMetadata,
     DocumentResponse,
     FileListResponse,
     MCPInfoResponse,
@@ -29,23 +32,29 @@ logger = logging.getLogger(__name__)
 config = load_config()
 
 # Initialize global components
-vector_store = VectorStore()
+vector_store = VectorStore(embedding_config=config.embedding_model)
 processor = DocumentProcessor(
     chunk_size=config.indexing.chunk_size, chunk_overlap=config.indexing.chunk_overlap
 )
 file_watcher = None
 
+# LlamaIndex components (initialized in lifespan)
+query_engine = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> Any:
     """Manage application lifespan events."""
-    global file_watcher
+    global file_watcher, query_engine
 
     # Startup: Initialize file watcher and perform initial indexing
     logger.info("Starting Vault MCP Server")
 
     # Perform initial indexing
     await initial_indexing()
+
+    # Initialize LlamaIndex components
+    await setup_llamaindex()
 
     # Start file watcher if enabled
     if config.watcher.enabled:
@@ -97,17 +106,43 @@ async def initial_indexing() -> None:
     logger.info(f"Initial indexing completed: {total_files} files processed")
 
 
+async def setup_llamaindex() -> None:
+    """Initialize LlamaIndex components."""
+    global query_engine
+
+    query_engine = create_agentic_query_engine(
+        config=config, vector_store=vector_store, similarity_top_k=10, max_workers=3
+    )
+
+    if query_engine:
+        logger.info("LlamaIndex components initialized successfully")
+    else:
+        logger.warning(
+            "Failed to initialize LlamaIndex components. Fallback to basic retrieval."
+        )
+        query_engine = None
+
+
 @app.get("/mcp/info", response_model=MCPInfoResponse)
 def get_mcp_info() -> MCPInfoResponse:
     """Provide info on server capabilities and configuration."""
     return MCPInfoResponse(
         mcp_version="1.0",
-        capabilities=["search", "document_retrieval", "live_sync", "introspection"],
+        capabilities=[
+            "search",
+            "document_retrieval",
+            "live_sync",
+            "introspection",
+            "rag_generation",
+        ],
         indexed_files=vector_store.get_all_file_paths(),
         config={
             "chunk_size": config.indexing.chunk_size,
             "overlap": config.indexing.chunk_overlap,
             "quality_threshold": config.indexing.quality_threshold,
+            "embedding_provider": config.embedding_model.provider,
+            "embedding_model": config.embedding_model.model_name,
+            "generation_model": config.generation_model.model_name,
         },
     )
 
@@ -146,16 +181,53 @@ def get_document(
 
 @app.post("/mcp/query", response_model=QueryResponse)
 def query_documents(request: QueryRequest) -> QueryResponse:
-    """Perform a semantic search query across indexed documents."""
-    results = vector_store.search(
-        request.query,
-        limit=request.limit or 5,
-        quality_threshold=config.indexing.quality_threshold,
-    )
+    """Perform agentic RAG query using LlamaIndex."""
+    global query_engine
 
-    # Extract the highest ranking result for answer
-    answer = results[0].text if results else ""
-    return QueryResponse(answer=answer, sources=results)
+    if query_engine is None:
+        # Fallback to basic retrieval if LlamaIndex setup failed
+        logger.warning(
+            "LlamaIndex query engine not available, falling back to basic retrieval"
+        )
+        results = vector_store.search(
+            request.query,
+            limit=request.limit or 5,
+            quality_threshold=config.indexing.quality_threshold,
+        )
+        return QueryResponse(sources=results)
+
+    try:
+        # Use LlamaIndex agentic query engine
+        response = query_engine.query(request.query)
+
+        # Extract source information from the response
+        sources = []
+        if hasattr(response, "source_nodes"):
+            for node in response.source_nodes:
+                # Convert LlamaIndex node back to our ChunkMetadata format
+                chunk_metadata = ChunkMetadata(
+                    text=node.node.get_content(metadata_mode=MetadataMode.NONE),
+                    file_path=node.node.metadata.get("file_path", ""),
+                    chunk_id=node.node.id_,
+                    score=float(
+                        node.score
+                        if hasattr(node, "score") and node.score is not None
+                        else 0.0
+                    ),
+                )
+                sources.append(chunk_metadata)
+
+        return QueryResponse(sources=sources)
+
+    except Exception as e:
+        logger.error(f"Error in agentic query: {e}")
+        # Fallback to basic retrieval
+        results = vector_store.search(
+            request.query,
+            limit=request.limit or 5,
+            quality_threshold=config.indexing.quality_threshold,
+        )
+        return QueryResponse(sources=results)
 
 
 @app.post("/mcp/reindex", response_model=ReindexResponse)

@@ -22,6 +22,12 @@ dependencies = [
     "pydantic>=2.0.0",
     "python-multipart>=0.0.6",
     "aiofiles>=23.0.0",
+    "litellm>=1.28.0",
+    "openai>=1.12.0",
+    "mlx-lm>=0.12.0",
+    "llama-index-core>=0.10.0",
+    "llama-index-llms-litellm",
+    "llama-index-vector-stores-chroma",
 ]
 
 [project.optional-dependencies]
@@ -74,5 +80,7 @@ addopts = "--cov=vault_mcp --cov=components --cov-report=term-missing"
 
 [dependency-groups]
 dev = [
+    "pytest>=8.4.1",
+    "pytest-cov>=6.2.1",
     "types-toml>=0.10.8.20240310",
 ]

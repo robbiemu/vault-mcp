@@ -8,6 +8,7 @@ from components.vector_store.vector_store import VectorStore
 from fastapi.testclient import TestClient
 from vault_mcp.config import (
     Config,
+    EmbeddingModelConfig,
     IndexingConfig,
     PathsConfig,
     PrefixFilterConfig,
@@ -48,7 +49,12 @@ def test_full_document_workflow(client, sample_markdown_files, integration_confi
         chunk_overlap=integration_config.indexing.chunk_overlap
     )
 
+    embedding_config = EmbeddingModelConfig(
+        provider="sentence_transformers",
+        model_name="all-MiniLM-L6-v2"
+    )
     vector_store = VectorStore(
+        embedding_config=embedding_config,
         persist_directory="./test_chroma_integration",
         collection_name="integration_test"
     )
@@ -115,7 +121,8 @@ def test_query_endpoint(client):
     assert response.status_code == 200
 
     data = response.json()
-    assert "answer" in data
+    # Note: After migration to agentic architecture, answer field is removed
+    # and only sources are returned
     assert "sources" in data
     assert isinstance(data["sources"], list)
 
@@ -173,7 +180,12 @@ The system should be able to find this content when searching for relevant terms
         chunk_overlap=integration_config.indexing.chunk_overlap
     )
 
+    embedding_config = EmbeddingModelConfig(
+        provider="sentence_transformers",
+        model_name="all-MiniLM-L6-v2"
+    )
     vector_store = VectorStore(
+        embedding_config=embedding_config,
         persist_directory="./test_pipeline_chroma",
         collection_name="pipeline_test"
     )

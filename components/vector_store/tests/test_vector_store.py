@@ -4,6 +4,7 @@ import contextlib
 
 import pytest
 from components.mcp_server.models import ChunkMetadata
+from vault_mcp.config import EmbeddingModelConfig
 
 from ..vector_store import VectorStore
 
@@ -11,7 +12,11 @@ from ..vector_store import VectorStore
 @pytest.fixture
 def temp_vector_store(tmp_path):
     """Create a temporary vector store for testing."""
+    embedding_config = EmbeddingModelConfig(
+        provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
+    )
     vector_store = VectorStore(
+        embedding_config=embedding_config,
         persist_directory=str(tmp_path / "test_chroma"),
         collection_name="test_collection",
     )
@@ -24,7 +29,11 @@ def temp_vector_store(tmp_path):
 
 def test_vector_store_initialization(tmp_path):
     """Test vector store initialization."""
+    embedding_config = EmbeddingModelConfig(
+        provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
+    )
     vector_store = VectorStore(
+        embedding_config=embedding_config,
         persist_directory=str(tmp_path / "test_chroma"),
         collection_name="test_collection",
     )

@@ -4,7 +4,8 @@ A **Model Context Protocol (MCP)** compliant server that indexes, searches, and 
 
 ## ✨ Features
 
-- 🔍 **Semantic Search**: Vector-based RAG search across your Obsidian vault
+- 🤖 **Retrieval-Augmented Generation (RAG)**: Enhanced document retrieval with text generation for comprehensive answers using context-aware AI models
+- 🔍 **Semantic Search**: Vector-based search across your Obsidian vault
 - 📁 **Prefix Filtering**: Only index files matching specific filename prefixes
 - 🔄 **Live Sync**: Automatically re-indexes files when they change on disk
 - 📊 **Quality Scoring**: Filters document chunks based on content quality
@@ -26,6 +27,7 @@ graph TB
             MS["🖥️ MCP Server<br/>(FastAPI)"]
             VS["🔍 Vector Store<br/>(ChromaDB)"]
             FW["👁️ File Watcher<br/>(Live Sync)"]
+            AR["🤖 Agentic Retriever<br/>(LlamaIndex)"]
         end
         
         subgraph "Shared Utilities"
@@ -34,27 +36,33 @@ graph TB
         end
     end
     
+    subgraph "External Services"
+        LLM["🚀 LLM Providers<br/>(OpenAI/Anthropic/Ollama)"]
+    end
+    
     %% Data flow connections
     OV -->|"Monitor .md files"| FW
     FW -->|"Process changes"| DP
     DP -->|"Generate chunks"| VS
-    
-    AI <-->|"HTTP/REST API<br/>(MCP Protocol)"| MS
+    AI <-->|"HTTP/REST API (MCP Protocol)"| MS
     MS -->|"Search queries"| VS
+    MS -->|"RAG queries"| AR
     MS -->|"Document retrieval"| OV
+    AR <-->|"Generate answers"| LLM
     
     %% Configuration connections
     CF -.->|"Configure"| MS
     CF -.->|"Configure"| FW
     CF -.->|"Configure"| VS
+    CF -.->|"Configure"| AR
     
     %% Styling
     classDef component fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     classDef external fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
     classDef utility fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
     
-    class MS,VS,FW component
-    class OV,AI external
+    class MS,VS,FW,AR component
+    class OV,AI,LLM external
     class DP,CF utility
 ```
 
@@ -104,38 +112,44 @@ uv sync --extra dev
 
 ### 2. Configuration
 
-Copy and edit the configuration file:
+The server loads configuration from `config/app.toml`. You can either:
 
-```bash
-cp config/app.toml config/app.local.toml
-```
+1. **Edit the main config directly** (simplest approach):
+   ```bash
+   # Edit the main configuration file
+   editor config/app.toml
+   ```
 
-Edit `config/app.local.toml`:
+2. **Create a custom config file** (for deployment scenarios):
+   ```bash
+   cp config/app.toml my-config.toml
+   # Then run with: uvicorn components.mcp_server.main:app --reload --env-file my-config.toml
+   ```
+
+Here are the most common settings to customize:
 
 ```toml
+# Update the vault path to point to your Obsidian vault
 [paths]
 vault_dir = "/path/to/your/obsidian-vault"
 
+# Override the generation model if desired
+[generation_model]
+model_name = "gpt-4o-mini"  # or "claude-3-haiku-20240307", "ollama/mistral", etc.
+[generation_model.parameters]
+temperature = 0.3
+max_tokens = 2000
+
+# Customize file filtering if needed
 [prefix_filter]
 allowed_prefixes = [
-  "Resource Balance Game",
-  "Decentralized Multiplayer Game System",
-  "Project Documentation"
+  "Project Documentation",
+  "Meeting Notes",
+  "Research"
 ]
-
-[indexing]
-chunk_size = 512
-chunk_overlap = 64
-quality_threshold = 0.75
-
-[watcher]
-enabled = true
-debounce_seconds = 2
-
-[server]
-host = "127.0.0.1"
-port = 8000
 ```
+
+The base configuration file (`config/app.toml`) contains comprehensive examples and documentation for all available options.
 
 ### 3. Run the Server
 
@@ -154,11 +168,11 @@ The server will start and automatically index your vault. Visit `http://localhos
 ### GET `/mcp/info`
 Get server capabilities and configuration.
 
-**Response:**
+**Response (example with RAG capabilities):**
 ```json
 {
   "mcp_version": "1.0",
-  "capabilities": ["search", "document_retrieval", "live_sync", "introspection"],
+  "capabilities": ["search", "document_retrieval", "live_sync", "introspection", "rag_generation"],
   "indexed_files": ["Resource Balance Game - Goals.md", "..."],
   "config": {
     "chunk_size": 512,
@@ -195,7 +209,7 @@ Retrieve full document content.
 ```
 
 ### POST `/mcp/query`
-Perform semantic search across indexed documents.
+Perform an agentic retrieval-augmented generation query across indexed documents.
 
 **Request:**
 ```json
@@ -208,7 +222,6 @@ Perform semantic search across indexed documents.
 **Response:**
 ```json
 {
-  "answer": "The game economy is based on...",
   "sources": [
     {
       "text": "Economy chunk content...",
@@ -254,6 +267,87 @@ Force a full re-index of the vault.
 - `host`: Server host address
 - `port`: Server port number
 
+### Model Configuration
+
+#### Embedding Models
+
+The server supports three embedding providers:
+
+**1. Sentence Transformers (Default)**
+```toml
+[embedding_model]
+provider = "sentence_transformers"
+model_name = "all-MiniLM-L6-v2"  # or any Hugging Face model
+```
+
+**2. MLX Embeddings (Apple Silicon)**
+```toml
+[embedding_model]
+provider = "mlx_embeddings"
+model_name = "mlx-community/mxbai-embed-large-v1"
+```
+
+**3. OpenAI-Compatible API**
+```toml
+[embedding_model]
+provider = "openai_endpoint"
+model_name = "nomic-embed-text"
+endpoint_url = "http://localhost:11434/v1"  # Ollama example
+api_key = "ollama"  # Required, even if unused
+```
+
+#### Generation Models
+
+The server uses [LiteLLM](https://github.com/BerriAI/litellm) for unified model access:
+
+**Local Models (Ollama)**
+```toml
+[generation_model]
+model_name = "ollama/llama3"  # or ollama/mistral, ollama/codellama
+[generation_model.parameters]
+temperature = 0.5
+max_tokens = 1024
+```
+
+**OpenAI Models**
+```toml
+[generation_model]
+model_name = "gpt-4o-mini"  # Set OPENAI_API_KEY environment variable
+[generation_model.parameters]
+temperature = 0.3
+max_tokens = 2000
+```
+
+**Anthropic Models**
+```toml
+[generation_model]
+model_name = "claude-3-haiku-20240307"  # Set ANTHROPIC_API_KEY environment variable
+[generation_model.parameters]
+temperature = 0.4
+max_tokens = 1500
+```
+
+**Other Providers**
+LiteLLM supports 100+ models. See the [LiteLLM documentation](https://docs.litellm.ai/docs/providers) for the complete list.
+
+#### Environment Variables for API Keys
+
+For cloud-based models, set the appropriate environment variables:
+
+```bash
+# OpenAI
+export OPENAI_API_KEY="your-openai-api-key"
+
+# Anthropic
+export ANTHROPIC_API_KEY="your-anthropic-api-key"
+
+# Azure OpenAI
+export AZURE_API_KEY="your-azure-key"
+export AZURE_API_BASE="https://your-resource.openai.azure.com"
+
+# Add more as needed for other providers
+```
+
 ## 🔧 Development
 
 ### Setup Development Environment
@@ -296,9 +390,12 @@ vault-mcp/
 │   ├── vector_store/        # Document embedding and search component
 │   │   ├── vector_store.py  # ChromaDB management
 │   │   └── tests/           # Vector store tests
-│   └── file_watcher/        # Live file monitoring component
-│       ├── file_watcher.py  # File system event handling
-│       └── tests/           # File watcher tests
+│   ├── file_watcher/        # Live file monitoring component
+│   │   ├── file_watcher.py  # File system event handling
+│   │   └── tests/           # File watcher tests
+│   └── agentic_retriever/  # Agentic retrieval and RAG generation component
+│       ├── agentic_retriever.py # Core retriever logic
+│       └── tests/           # Agent-specific tests
 ├── vault_mcp/               # Shared utilities and libraries
 │   ├── config.py            # Configuration management
 │   ├── document_processor.py # Markdown processing and chunking
@@ -319,17 +416,20 @@ vault-mcp/
 
 1. **Document Ingestion**: The server scans your Obsidian vault for `.md` files matching the configured prefixes.
 
-2. **Markdown Processing**: Each file is parsed using a markdown-aware processor that extracts plain text while preserving structure.
+2. **Markdown Processing**: Files are parsed to extract plain text while maintaining structure.
 
-3. **Chunking**: Documents are split into overlapping chunks of configurable size for better semantic search.
+3. **Chunking and Quality Scoring**: Text is broken into chunks, scored for quality to filter valuable content.
 
-4. **Quality Scoring**: Each chunk is scored based on heuristics like length, completeness, structure, and content richness.
+4. **Embedding and Storage**: High-quality chunks are embedded using sentence transformers and stored in ChromaDB.
 
-5. **Vector Embedding**: High-quality chunks are embedded using a sentence transformer model and stored in ChromaDB.
+5. **Agentic Retrieval**: The `Agentic Retriever` conducts agent-driven retrieval and refinement:
+   - Searches relevant document chunks using `DocumentRAGTool`
+   - Refines informative content via `ChunkRewriteAgent`
+   - Manages concurrent processing with `ChunkRewriterPostprocessor`
 
-6. **Live Sync**: A file watcher monitors the vault for changes and automatically updates the index.
+6. **Live Sync and Query Handling**: A file watcher monitors the vault for changes, providing up-to-date search capabilities.
 
-7. **Semantic Search**: Queries are embedded and matched against stored chunks using cosine similarity.
+7. **Comprehensive Query Processing**: Queries are processed to deliver contextually rich and precise answers through a unified RAG pipeline.
 
 ## 🎯 Use Cases
 

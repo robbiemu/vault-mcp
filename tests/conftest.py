@@ -10,6 +10,7 @@ import pytest
 from components.vector_store.vector_store import VectorStore
 from vault_mcp.config import (
     Config,
+    EmbeddingModelConfig,
     IndexingConfig,
     PathsConfig,
     PrefixFilterConfig,
@@ -93,9 +94,21 @@ def document_processor() -> DocumentProcessor:
 
 
 @pytest.fixture
-def temp_vector_store(tmp_path: Path) -> Generator[VectorStore, None, None]:
+def test_embedding_config() -> EmbeddingModelConfig:
+    """Create a test embedding configuration."""
+    return EmbeddingModelConfig(
+        provider="sentence_transformers",
+        model_name="all-MiniLM-L6-v2"
+    )
+
+
+@pytest.fixture
+def temp_vector_store(
+    tmp_path: Path, test_embedding_config: EmbeddingModelConfig
+) -> Generator[VectorStore, None, None]:
     """Create a temporary vector store for testing."""
     vector_store = VectorStore(
+        embedding_config=test_embedding_config,
         persist_directory=str(tmp_path / "test_chroma"),
         collection_name="test_vault_docs"
     )

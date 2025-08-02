@@ -1,7 +1,7 @@
 """Configuration management for the vault MCP server."""
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import toml
 from pydantic import BaseModel, Field
@@ -47,6 +47,39 @@ class ServerConfig(BaseModel):
     port: int = Field(default=8000, description="Server port")
 
 
+class EmbeddingModelConfig(BaseModel):
+    """Configuration for embedding models."""
+
+    provider: str = Field(
+        default="sentence_transformers",
+        description=(
+            "Embedding provider: sentence_transformers, mlx_embeddings, "
+            "or openai_endpoint"
+        ),
+    )
+    model_name: str = Field(
+        default="all-MiniLM-L6-v2", description="Model name or identifier"
+    )
+    endpoint_url: Optional[str] = Field(
+        default=None, description="API endpoint URL for openai_endpoint provider"
+    )
+    api_key: Optional[str] = Field(
+        default=None, description="API key for openai_endpoint provider"
+    )
+
+
+class GenerationModelConfig(BaseModel):
+    """Configuration for text generation models."""
+
+    model_name: str = Field(
+        default="ollama/llama3", description="LiteLLM model identifier"
+    )
+    parameters: Dict[str, Any] = Field(
+        default_factory=lambda: {"temperature": 0.5, "max_tokens": 1024},
+        description="Parameters passed to litellm.completion()",
+    )
+
+
 class Config(BaseModel):
     """Main configuration model."""
 
@@ -55,6 +88,10 @@ class Config(BaseModel):
     indexing: IndexingConfig = Field(default_factory=IndexingConfig)
     watcher: WatcherConfig = Field(default_factory=WatcherConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
+    embedding_model: EmbeddingModelConfig = Field(default_factory=EmbeddingModelConfig)
+    generation_model: GenerationModelConfig = Field(
+        default_factory=GenerationModelConfig
+    )
 
     @classmethod
     def load_from_file(cls, config_path: str) -> "Config":
@@ -84,7 +121,12 @@ class Config(BaseModel):
 
 
 def load_config(config_path: Optional[str] = None) -> Config:
-    """Load configuration from file or return default config."""
+    """Load configuration from file with fallback to default.
+
+    If config_path is provided, attempts to load from that file.
+    If config_path is None, attempts to load from default 'config/app.toml'.
+    If file doesn't exist or loading fails, returns default configuration.
+    """
     if config_path is None:
         config_path = "config/app.toml"
 
@@ -98,4 +140,21 @@ def load_config(config_path: Optional[str] = None) -> Config:
             indexing=IndexingConfig(),
             watcher=WatcherConfig(),
             server=ServerConfig(),
+            embedding_model=EmbeddingModelConfig(),
+            generation_model=GenerationModelConfig(),
         )
+
+
+def _deep_merge_config(
+    base: Dict[str, Any], override: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Deep merge configuration dictionaries."""
+    result = base.copy()
+
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge_config(result[key], value)
+        else:
+            result[key] = value
+
+    return result

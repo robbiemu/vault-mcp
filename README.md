@@ -154,14 +154,29 @@ The base configuration file (`config/app.toml`) contains comprehensive examples 
 ### 3. Run the Server
 
 ```bash
-# Using uvicorn directly
-uvicorn components.mcp_server.main:app --reload --host 127.0.0.1 --port 8000
-
-# Or using the installed script (if available)
+# Using the installed script
 vault-mcp
 ```
 
 The server will start and automatically index your vault. Visit `http://localhost:8000/docs` for the interactive API documentation.
+
+#### Command-Line Overrides
+
+You can override the default configuration file locations using command-line flags. This is useful for running multiple server instances against different parts of your vault.
+
+- `-c, --config`: Path to a directory containing `app.toml` and `prompts.toml`.
+- `-a, --app-config`: Path to a specific `app.toml` file.
+- `-p, --prompts-config`: Path to a specific `prompts.toml` file.
+
+**Example:**
+
+```bash
+# Run the server using a custom app config for a specific project
+vault-mcp --app-config ./configs/project_a_config.toml
+
+# Run with a completely different configuration set
+vault-mcp --config ./project_b_config/
+```
 
 ## 📋 API Endpoints
 

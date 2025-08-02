@@ -1,5 +1,6 @@
 """HTTP server and FastAPI endpoints for MCP server."""
 
+import argparse
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -231,29 +232,56 @@ def query_documents(request: QueryRequest) -> QueryResponse:
 
 
 @app.post("/mcp/reindex", response_model=ReindexResponse)
-def reindex_documents() -> ReindexResponse:
+async def reindex_documents() -> ReindexResponse:
     """Force a full reindex of documents from the vault."""
     # Clear the existing vector store
     vector_store.clear_all()
 
-    # Process and index all files
-    vault_path = config.get_vault_path()
-    total_files = 0
+    # Repopulate by calling initial_indexing
+    await initial_indexing()
 
-    for file in vault_path.glob("*.md"):
-        if config.should_include_file(file.name):
-            _, chunks = processor.process_file(file)
-            vector_store.add_chunks(chunks)
-            total_files += 1
+    # Get the count of processed files from the vector store
+    files_processed = len(vector_store.get_all_file_paths())
 
     return ReindexResponse(
-        success=True, message="Reindexing completed", files_processed=total_files
+        success=True,
+        message="Reindexing completed",
+        files_processed=files_processed,
     )
 
 
 def main() -> None:
     """Main entry point for the vault-mcp CLI."""
     import uvicorn
+
+    # --- ADD THIS PARSER BLOCK ---
+    parser = argparse.ArgumentParser(
+        description="MCP-compliant Obsidian documentation server."
+    )
+    parser.add_argument(
+        "-c",
+        "--config",
+        help="Path to the config folder to use for all config files.",
+    )
+    parser.add_argument(
+        "-a",
+        "--app-config",
+        help="Path to the app.toml file to use.",
+    )
+    parser.add_argument(
+        "-p",
+        "--prompts-config",
+        help="Path to the prompts.toml file to use.",
+    )
+    args = parser.parse_args()
+
+    # --- UPDATE THE GLOBAL CONFIG USING THE PARSED ARGS ---
+    global config
+    config = load_config(
+        config_dir=args.config,
+        app_config_path=args.app_config,
+        prompts_config_path=args.prompts_config,
+    )
 
     logger.info(f"Starting server on {config.server.host}:{config.server.port}")
 

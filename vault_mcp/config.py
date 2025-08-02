@@ -1,10 +1,13 @@
 """Configuration management for the vault MCP server."""
 
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import toml
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class PathsConfig(BaseModel):
@@ -92,6 +95,10 @@ class Config(BaseModel):
     generation_model: GenerationModelConfig = Field(
         default_factory=GenerationModelConfig
     )
+    # --- ADD THIS FIELD FOR PROMPTS ---
+    prompts: Dict[str, Any] = Field(
+        default_factory=dict, description="Loaded prompts from prompts.toml"
+    )
 
     @classmethod
     def load_from_file(cls, config_path: str) -> "Config":
@@ -120,29 +127,45 @@ class Config(BaseModel):
         )
 
 
-def load_config(config_path: Optional[str] = None) -> Config:
-    """Load configuration from file with fallback to default.
+def load_config(
+    config_dir: Optional[str] = None,
+    app_config_path: Optional[str] = None,
+    prompts_config_path: Optional[str] = None,
+) -> Config:
+    """Load all configurations, handling CLI overrides."""
+    base_dir = Path(config_dir) if config_dir else Path("config")
 
-    If config_path is provided, attempts to load from that file.
-    If config_path is None, attempts to load from default 'config/app.toml'.
-    If file doesn't exist or loading fails, returns default configuration.
-    """
-    if config_path is None:
-        config_path = "config/app.toml"
+    # Determine final paths for each config file
+    app_path = Path(app_config_path) if app_config_path else base_dir / "app.toml"
+    prompts_path = (
+        Path(prompts_config_path) if prompts_config_path else base_dir / "prompts.toml"
+    )
 
+    # Load main app config
     try:
-        return Config.load_from_file(config_path)
+        logger.info(f"Loading app config from: {app_path}")
+        with open(app_path, "r") as f:
+            app_data = toml.load(f)
     except FileNotFoundError:
-        # Return a default config if no file is found
-        return Config(
-            paths=PathsConfig(vault_dir="./vault"),
-            prefix_filter=PrefixFilterConfig(allowed_prefixes=[]),
-            indexing=IndexingConfig(),
-            watcher=WatcherConfig(),
-            server=ServerConfig(),
-            embedding_model=EmbeddingModelConfig(),
-            generation_model=GenerationModelConfig(),
+        logger.error(f"Application config file not found at {app_path}. Aborting.")
+        raise
+
+    # Load prompts config
+    try:
+        logger.info(f"Loading prompts from: {prompts_path}")
+        with open(prompts_path, "r") as f:
+            prompts_data = toml.load(f)
+    except FileNotFoundError:
+        logger.warning(
+            f"Prompts config file not found at {prompts_path}. Using empty prompts."
         )
+        prompts_data = {}
+
+    # Create the final config object
+    config = Config(**app_data)
+    config.prompts = prompts_data
+
+    return config
 
 
 def _deep_merge_config(

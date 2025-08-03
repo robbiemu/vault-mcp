@@ -4,14 +4,14 @@ import argparse
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Optional
 
 from components.agentic_retriever import create_agentic_query_engine
 from components.file_watcher.file_watcher import VaultWatcher
 from components.vector_store.vector_store import VectorStore
 from fastapi import FastAPI, HTTPException, Query
 from llama_index.core.schema import MetadataMode
-from vault_mcp.config import load_config
+from vault_mcp.config import Config, load_config
 from vault_mcp.document_processor import DocumentProcessor
 
 from .models import (
@@ -29,24 +29,19 @@ log_level = os.getenv("LOG_LEVEL", "INFO")
 logging.basicConfig(level=getattr(logging, log_level.upper()))
 logger = logging.getLogger(__name__)
 
-# Load configuration
-config = load_config()
-
-# Initialize global components
-vector_store: VectorStore | None = None  # Will be initialized in lifespan
-processor = DocumentProcessor(
-    chunk_size=config.indexing.chunk_size, chunk_overlap=config.indexing.chunk_overlap
-)
-file_watcher = None
-
-# LlamaIndex components (initialized in lifespan)
-query_engine = None
+# Declare global components but do not initialize them yet.
+# They will be initialized in the main() function after config is loaded.
+config: Optional[Config] = None
+vector_store: Optional[VectorStore] = None
+processor: Optional[DocumentProcessor] = None
+file_watcher: Optional[VaultWatcher] = None
+query_engine: Optional[Any] = None  # Using Any for LlamaIndex query_engine
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> Any:
     """Manage application lifespan events."""
-    global vector_store, file_watcher, query_engine
+    global config, vector_store, file_watcher, query_engine
 
     # Initialize the VectorStore here, using the final config
     vector_store = VectorStore(
@@ -322,17 +317,19 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # --- UPDATE THE GLOBAL CONFIG USING THE PARSED ARGS ---
-    global config
-    config = load_config(
-        config_dir=args.config,
-        app_config_path=args.app_config,
-        prompts_config_path=args.prompts_config,
-    )
+    # Load config from the provided path first.
+    global config, processor, vector_store
+    config = load_config(config_dir=args.config)
 
-    if args.database_dir:
-        config.paths.database_dir = args.database_dir
-        logger.info(f"Overriding database directory with: {config.paths.database_dir}")
+    # Now, initialize the other components using the loaded config.
+    processor = DocumentProcessor(
+        chunk_size=config.indexing.chunk_size,
+        chunk_overlap=config.indexing.chunk_overlap,
+    )
+    vector_store = VectorStore(
+        embedding_config=config.embedding_model,
+        persist_directory=config.paths.database_dir,
+    )
 
     logger.info(f"Starting server on {config.server.host}:{config.server.port}")
 

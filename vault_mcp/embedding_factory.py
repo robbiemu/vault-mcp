@@ -69,7 +69,7 @@ class SentenceTransformersEmbedding(BaseEmbedding):
 class MLXEmbedding(BaseEmbedding):
     """Wrapper for MLX embedding models."""
 
-    # Add model configuration to allow arbitrary attributes
+    # model configuration to allow arbitrary attributes
     model_config = {"arbitrary_types_allowed": True}
 
     def __init__(self, model_name: str, **kwargs: Any):
@@ -139,6 +139,8 @@ class MLXEmbedding(BaseEmbedding):
 class OpenAIEndpointEmbedding(BaseEmbedding):
     """Wrapper for OpenAI-compatible API endpoints."""
 
+    model_config = {"arbitrary_types_allowed": True}
+
     def __init__(self, model_name: str, endpoint_url: str, api_key: str, **kwargs: Any):
         """Initialize OpenAI-compatible embedding client.
 
@@ -152,7 +154,9 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
         try:
             from openai import OpenAI
 
-            self.client = OpenAI(api_key=api_key, base_url=endpoint_url)
+            client = OpenAI(api_key=api_key, base_url=endpoint_url)
+            object.__setattr__(self, "client", client)
+
             self._model_name = model_name
             logger.info(
                 f"Initialized OpenAI-compatible client for {model_name} "
@@ -160,8 +164,7 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
             )
         except ImportError as e:
             raise ImportError(
-                "openai is required for this provider. "
-                "Install with: pip install openai"
+                "openai is required for this provider. Install with: pip install openai"
             ) from e
 
     def encode(self, texts: List[str]) -> List[List[float]]:

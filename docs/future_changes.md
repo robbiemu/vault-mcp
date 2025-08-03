@@ -1,0 +1,1 @@
+1. idea - we have a custom embedding engine, whihc we can directly plug into llamaindex. We should convert this into a pluggable system so as to support using approaches like pylate/colbert.

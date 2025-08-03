@@ -43,6 +43,11 @@ async def lifespan(_app: FastAPI) -> Any:
     """Manage application lifespan events."""
     global config, vector_store, file_watcher, query_engine
 
+    if config is None:
+        raise RuntimeError("Config not initialized")
+    if processor is None:
+        raise RuntimeError("DocumentProcessor not initialized")
+
     # Initialize the VectorStore here, using the final config
     vector_store = VectorStore(
         embedding_config=config.embedding_model,
@@ -80,7 +85,7 @@ async def initial_indexing() -> None:
     """Perform initial indexing of the vault."""
     logger.info("Starting initial vault indexing")
 
-    # Ensure vector_store is initialized
+    # Ensure vector_store and config are initialized
     if vector_store is None:
         raise RuntimeError(
             (
@@ -88,6 +93,10 @@ async def initial_indexing() -> None:
                 "during normal startup."
             )
         )
+    if config is None:
+        raise RuntimeError("Config not initialized")
+    if processor is None:
+        raise RuntimeError("DocumentProcessor not initialized")
 
     vault_path = config.get_vault_path()
     if not vault_path.exists():
@@ -124,7 +133,7 @@ async def setup_llamaindex() -> None:
     """Initialize LlamaIndex components."""
     global query_engine
 
-    # Ensure vector_store is initialized
+    # Ensure vector_store and config are initialized
     if vector_store is None:
         raise RuntimeError(
             (
@@ -132,6 +141,8 @@ async def setup_llamaindex() -> None:
                 "during normal startup."
             )
         )
+    if config is None:
+        raise RuntimeError("Config not initialized")
 
     query_engine = create_agentic_query_engine(
         config=config, vector_store=vector_store, similarity_top_k=10, max_workers=3
@@ -151,6 +162,8 @@ def get_mcp_info() -> MCPInfoResponse:
     """Provide info on server capabilities and configuration."""
     if vector_store is None:
         raise HTTPException(status_code=503, detail="Server is starting up")
+    if config is None:
+        raise HTTPException(status_code=503, detail="Config not initialized")
 
     return MCPInfoResponse(
         mcp_version="1.0",
@@ -219,6 +232,8 @@ def query_documents(request: QueryRequest) -> QueryResponse:
 
     if vector_store is None:
         raise HTTPException(status_code=503, detail="Server is starting up")
+    if config is None:
+        raise HTTPException(status_code=503, detail="Config not initialized")
 
     if query_engine is None:
         # Fallback to basic retrieval if LlamaIndex setup failed
@@ -250,6 +265,9 @@ def query_documents(request: QueryRequest) -> QueryResponse:
                         if hasattr(node, "score") and node.score is not None
                         else 0.0
                     ),
+                    start_byte=int(node.node.metadata.get("start_byte", 0)),
+                    end_byte=int(node.node.metadata.get("end_byte", 0)),
+                    original_text=str(node.node.metadata.get("original_text", "")),
                 )
                 sources.append(chunk_metadata)
 

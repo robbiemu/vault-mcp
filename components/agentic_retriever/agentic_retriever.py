@@ -16,6 +16,7 @@ from llama_index.core.tools import FunctionTool
 from llama_index.llms.litellm import LiteLLM
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from vault_mcp.config import Config
+from vault_mcp.document_tools import FullDocumentRetrievalTool, SectionRetrievalTool
 from vault_mcp.embedding_factory import create_embedding_model
 
 logger = logging.getLogger(__name__)
@@ -147,24 +148,17 @@ If the chunk is not relevant to the query, indicate that clearly.
 Provide your rewritten version:"""
 
     async def rewrite_chunk(self, chunk: NodeWithScore) -> str:
-        """Rewrite a chunk to be more relevant and contextual.
-
-        Args:
-            chunk: The chunk to rewrite
-
-        Returns:
-            The rewritten chunk content
-        """
+        """Rewrite a chunk to be more relevant and contextual."""
         try:
-            # Get chunk content and metadata
-            content = chunk.node.get_content(metadata_mode=MetadataMode.LLM)
+            # Get ONLY the clean text content, no metadata.
+            content = chunk.node.get_content(metadata_mode=MetadataMode.NONE)
             metadata = chunk.node.metadata
             document_title = metadata.get("title", "Unknown Document")
 
             # Create context from other chunks
             other_chunks = [c for c in self.all_chunks if c.node.id_ != chunk.node.id_]
             context_summaries = []
-            for other_chunk in other_chunks[:3]:  # Use top 3 other chunks for context
+            for other_chunk in other_chunks[:3]:
                 other_content = other_chunk.node.get_content(
                     metadata_mode=MetadataMode.NONE
                 )
@@ -177,17 +171,19 @@ Provide your rewritten version:"""
             )
 
             # Load the rewrite prompt from configuration
-            self._get_refinement_prompt(
+            prompt = self._get_refinement_prompt(
                 self.query, document_title, content, context_str
             )
-            # For now, just return the original content with a note about rewriting
-            # This avoids issues with agent methods until we can verify the API
-            return f"[Rewritten for query: {self.query}]\n\n{content}"
+
+            # Use the agent's run method which returns an awaitable WorkflowHandler
+            handler = self.agent.run(prompt)
+            response = await handler
+            return str(response)
 
         except Exception as e:
             logger.error(f"Error rewriting chunk {chunk.node.id_}: {e}")
-            # Fallback to original content
-            return chunk.node.get_content(metadata_mode=MetadataMode.LLM)
+            # Fallback to original content, but still clean.
+            return chunk.node.get_content(metadata_mode=MetadataMode.NONE)
 
 
 class ChunkRewriterPostprocessor(BaseNodePostprocessor):
@@ -251,20 +247,50 @@ class ChunkRewriterPostprocessor(BaseNodePostprocessor):
 
             # Create document tools for each unique document
             doc_tools = {}
+            full_doc_tool = FullDocumentRetrievalTool()
+            section_tool = SectionRetrievalTool()
+
             for node in nodes:
                 doc_id = node.node.metadata.get("document_id")
                 doc_title = node.node.metadata.get("title", "Unknown Document")
+                file_path = node.node.metadata.get("file_path")
 
-                if doc_id and doc_id not in doc_tools:
-                    rag_tool = DocumentRAGTool(self._index, doc_id, doc_title)
-                    function_tool = FunctionTool.from_defaults(
-                        fn=rag_tool.search_document,
-                        name=f"search_{doc_id.replace('-', '_')}",
+                if doc_id and doc_id not in doc_tools and file_path:
+                    # Create tool closures to capture the correct file_path
+                    def make_full_doc_tool(path: str) -> Any:
+                        def retrieve_full(dummy_arg: str = "unused") -> str:
+                            return full_doc_tool.retrieve_full_document(path)
+
+                        return retrieve_full
+
+                    def make_section_tool(path: str) -> Any:
+                        def get_sections(start_byte: int, end_byte: int) -> str:
+                            return section_tool.get_enclosing_sections(
+                                path, start_byte, end_byte
+                            )
+
+                        return get_sections
+
+                    # Create tools for this document
+                    full_doc_function_tool = FunctionTool.from_defaults(
+                        fn=make_full_doc_tool(file_path),
+                        name=f"read_full_{doc_id.replace('-', '_')}",
                         description=(
-                            f"Search for additional context within '{doc_title}'"
+                            f"WARNING: Read the entire content of '{doc_title}'. "
+                            f"This is a last resort for insufficient targeted methods."
                         ),
                     )
-                    doc_tools[doc_id] = function_tool
+
+                    section_function_tool = FunctionTool.from_defaults(
+                        fn=make_section_tool(file_path),
+                        name=f"get_sections_{doc_id.replace('-', '_')}",
+                        description=(
+                            f"Get sections for context in '{doc_title}' using bytes. "
+                            f"Primary tool for targeted context. Use start/end bytes."
+                        ),
+                    )
+
+                    doc_tools[doc_id] = [full_doc_function_tool, section_function_tool]
 
             # Create rewrite tasks with semaphore for concurrency control
             semaphore = asyncio.Semaphore(self._max_workers)
@@ -273,7 +299,7 @@ class ChunkRewriterPostprocessor(BaseNodePostprocessor):
                 async with semaphore:
                     # Get relevant tools for this chunk's document
                     doc_id = chunk.node.metadata.get("document_id")
-                    relevant_tools = [doc_tools[doc_id]] if doc_id in doc_tools else []
+                    relevant_tools = doc_tools.get(doc_id, [])
 
                     # Create agent and rewrite
                     agent = ChunkRewriteAgent(

@@ -8,10 +8,24 @@ from pydantic import BaseModel, Field
 class ChunkMetadata(BaseModel):
     """Metadata for a document chunk."""
 
-    text: str = Field(..., description="The chunk text content")
+    text: str = Field(
+        ..., description="The clean, parsed text content for display and embedding"
+    )
     file_path: str = Field(..., description="Path to the source file")
     chunk_id: str = Field(..., description="Unique identifier for the chunk")
-    score: float = Field(..., description="Quality score of the chunk")
+    score: float = Field(..., description="Quality or relevance score of the chunk")
+
+    # --- ADD THESE NEW FIELDS ---
+    start_byte: int = Field(
+        ..., description="The starting byte offset of the chunk in the original file"
+    )
+    end_byte: int = Field(
+        ..., description="The ending byte offset of the chunk in the original file"
+    )
+    original_text: str = Field(
+        ...,
+        description="The original, unprocessed text of the chunk (raw Markdown)",
+    )
 
 
 class QueryRequest(BaseModel):

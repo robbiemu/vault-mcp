@@ -1,9 +1,48 @@
 """Tests for MCP Server main functionality."""
 
-import pytest
-from fastapi.testclient import TestClient
+import tempfile
 
+import pytest
+from components.vector_store.vector_store import VectorStore
+from fastapi.testclient import TestClient
+from vault_mcp.config import (
+    Config,
+    IndexingConfig,
+    PathsConfig,
+    PrefixFilterConfig,
+    WatcherConfig,
+)
+from vault_mcp.document_processor import DocumentProcessor
+
+# Import the global variables from the main module
+from .. import main as server_main
 from ..main import app
+
+
+@pytest.fixture(scope="function", autouse=True)
+def initialize_server():
+    """Initialize server configuration and components for testing."""
+    # Load the configuration
+    server_main.config = Config(
+        paths=PathsConfig(vault_dir=str(tempfile.mkdtemp())),  # Temp dir for testing
+        prefix_filter=PrefixFilterConfig(allowed_prefixes=["Resource Balance Game"]),
+        indexing=IndexingConfig(
+            chunk_size=200,
+            chunk_overlap=50,
+            quality_threshold=0.3,  # Lower threshold for testing
+        ),
+        watcher=WatcherConfig(enabled=False),  # Disable for integration tests
+    )
+
+    # Initialize other components
+    server_main.processor = DocumentProcessor(
+        chunk_size=server_main.config.indexing.chunk_size,
+        chunk_overlap=server_main.config.indexing.chunk_overlap,
+    )
+    server_main.vector_store = VectorStore(
+        embedding_config=server_main.config.embedding_model,
+        persist_directory=server_main.config.paths.database_dir,
+    )
 
 
 @pytest.fixture

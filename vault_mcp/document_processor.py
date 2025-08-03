@@ -206,19 +206,68 @@ class DocumentProcessor:
         return min(score, 1.0)  # Cap at 1.0
 
     def process_file(self, file_path: Path) -> Tuple[str, List[Dict[str, Any]]]:
-        """Process a single markdown file and return its content and chunks."""
+        """
+        Processes a single markdown file, creating chunks from the raw content
+        to preserve byte positions and original text.
+        """
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 raw_content = f.read()
 
-            # Parse markdown to plain text
-            plain_text = self.parse_markdown(raw_content)
-
-            # Create chunks
-            chunks = self.create_chunks(plain_text, str(file_path))
+            # The new logic creates chunks directly from the raw content.
+            chunks = self._create_chunks_from_raw(raw_content, str(file_path))
 
             return raw_content, chunks
 
         except Exception as e:
             print(f"Error processing file {file_path}: {e}")
             return "", []
+
+    def _create_chunks_from_raw(
+        self, raw_text: str, file_path: str
+    ) -> List[Dict[str, Any]]:
+        """Creates chunks from raw text, preserving byte offsets."""
+        if not raw_text.strip():
+            return []
+
+        chunks = []
+        chunk_index = 0
+        start_byte = 0
+
+        while start_byte < len(raw_text):
+            end_byte = min(start_byte + self.chunk_size, len(raw_text))
+
+            # The raw text for this chunk
+            original_chunk_text = raw_text[start_byte:end_byte]
+
+            # The clean, parsed text for embedding and display
+            clean_chunk_text = self.parse_markdown(original_chunk_text)
+
+            # Only create a chunk if the parsed text is not empty
+            if clean_chunk_text.strip():
+                chunk_id = f"{file_path}|{chunk_index}"
+                chunks.append(
+                    {
+                        "text": clean_chunk_text,
+                        "original_text": original_chunk_text,
+                        "file_path": file_path,
+                        "chunk_id": chunk_id,
+                        "score": self._calculate_chunk_quality(clean_chunk_text),
+                        "start_byte": start_byte,
+                        "end_byte": end_byte,
+                    }
+                )
+                chunk_index += 1
+
+            # Move the window for the next chunk, creating an overlap
+            start_byte += self.chunk_size - self.chunk_overlap
+
+            # Ensure we don't get stuck in an infinite loop on very small files
+            if (
+                self.chunk_size <= self.chunk_overlap
+                and chunks
+                and start_byte <= chunks[-1]["start_byte"]  # type: ignore[operator]
+            ):
+                break
+
+        return chunks

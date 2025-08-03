@@ -156,8 +156,7 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
 
             client = OpenAI(api_key=api_key, base_url=endpoint_url)
             object.__setattr__(self, "client", client)
-
-            self._model_name = model_name
+            object.__setattr__(self, "_model_name", model_name)
             logger.info(
                 f"Initialized OpenAI-compatible client for {model_name} "
                 f"at {endpoint_url}"
@@ -185,7 +184,7 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
             response = self.client.embeddings.create(
                 model=self._model_name, input=[query]
             )
-            return response.data[0].embedding
+            return cast(List[float], response.data[0].embedding)
         except Exception as e:
             logger.error(f"Error getting query embedding from OpenAI endpoint: {e}")
             return [0.0] * 1536
@@ -196,7 +195,7 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
             response = self.client.embeddings.create(
                 model=self._model_name, input=[text]
             )
-            return response.data[0].embedding
+            return cast(List[float], response.data[0].embedding)
         except Exception as e:
             logger.error(f"Error getting text embedding from OpenAI endpoint: {e}")
             return [0.0] * 1536

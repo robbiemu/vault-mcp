@@ -1,7 +1,10 @@
 """Integration tests for the complete vault MCP system."""
 
 import contextlib
+import tempfile
 
+# Import the global variables from the main module
+import components.mcp_server.main as server_main
 import pytest
 from components.mcp_server.main import app
 from components.vector_store.vector_store import VectorStore
@@ -29,6 +32,31 @@ def integration_config(temp_vault_dir):
             quality_threshold=0.3,  # Lower threshold for testing
         ),
         watcher=WatcherConfig(enabled=False),  # Disable for integration tests
+    )
+
+
+@pytest.fixture(scope="function", autouse=True)
+def initialize_server():
+    # Load the configuration
+    server_main.config = Config(
+        paths=PathsConfig(vault_dir=str(tempfile.mkdtemp())),  # Temp dir for testing
+        prefix_filter=PrefixFilterConfig(allowed_prefixes=["Resource Balance Game"]),
+        indexing=IndexingConfig(
+            chunk_size=200,
+            chunk_overlap=50,
+            quality_threshold=0.3,  # Lower threshold for testing
+        ),
+        watcher=WatcherConfig(enabled=False),  # Disable for integration tests
+    )
+
+    # Initialize other components
+    server_main.processor = DocumentProcessor(
+        chunk_size=server_main.config.indexing.chunk_size,
+        chunk_overlap=server_main.config.indexing.chunk_overlap,
+    )
+    server_main.vector_store = VectorStore(
+        embedding_config=server_main.config.embedding_model,
+        persist_directory=server_main.config.paths.database_dir,
     )
 
 

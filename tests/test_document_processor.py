@@ -119,6 +119,17 @@ def test_process_file(sample_markdown_files):
     )
     assert all(chunk["score"] > 0 for chunk in chunks)
 
+    # Verify all chunks have the new metadata fields
+    for chunk in chunks:
+        assert "start_byte" in chunk
+        assert "end_byte" in chunk
+        assert "original_text" in chunk
+        assert isinstance(chunk["start_byte"], int)
+        assert isinstance(chunk["end_byte"], int)
+        assert isinstance(chunk["original_text"], str)
+        assert 0 <= chunk["start_byte"] < chunk["end_byte"]
+        assert chunk["end_byte"] <= len(raw_content)
+
 
 def test_process_empty_file(sample_markdown_files):
     """Test processing an empty markdown file."""
@@ -139,3 +150,62 @@ def test_process_nonexistent_file(tmp_path):
 
     assert raw_content == ""
     assert len(chunks) == 0
+
+
+def test_raw_chunking_with_byte_positions():
+    """Test the new raw chunking method that preserves byte positions."""
+    processor = DocumentProcessor(chunk_size=50, chunk_overlap=10)
+
+    raw_text = "# Title\n\nThis is **bold** text. More content here."
+    file_path = "test.md"
+
+    chunks = processor._create_chunks_from_raw(raw_text, file_path)
+
+    # Verify we have chunks
+    assert len(chunks) > 0
+
+    # Verify each chunk has the new fields
+    for chunk in chunks:
+        assert "start_byte" in chunk
+        assert "end_byte" in chunk
+        assert "original_text" in chunk
+        assert "text" in chunk  # Clean parsed text
+        assert "file_path" in chunk
+        assert "chunk_id" in chunk
+        assert "score" in chunk
+
+        # Verify byte positions make sense
+        assert 0 <= chunk["start_byte"] < len(raw_text)
+        assert chunk["start_byte"] < chunk["end_byte"]
+        assert chunk["end_byte"] <= len(raw_text)
+
+        # Verify original text matches the byte positions
+        expected_original = raw_text[chunk["start_byte"] : chunk["end_byte"]]
+        assert chunk["original_text"] == expected_original
+
+        # Verify clean text is different from original (markdown should be parsed)
+        if "**" in chunk["original_text"]:
+            assert "**" not in chunk["text"]  # Bold markdown should be processed
+            assert "bold" in chunk["text"]  # But content should remain
+
+
+def test_chunks_preserve_byte_continuity():
+    """Test that chunks with overlap still maintain correct byte positions."""
+    processor = DocumentProcessor(chunk_size=20, chunk_overlap=5)
+
+    raw_text = "This is a long text that should be split into multiple chunks."
+    chunks = processor._create_chunks_from_raw(raw_text, "test.md")
+
+    # Should have multiple chunks due to small chunk size
+    assert len(chunks) > 1
+
+    # Verify chunks are in order and have correct byte positions
+    for i in range(len(chunks) - 1):
+        current_chunk = chunks[i]
+        next_chunk = chunks[i + 1]
+
+        # Current chunk should end before or at the next chunk's start + overlap
+        assert current_chunk["end_byte"] > next_chunk["start_byte"]
+
+        # But start positions should progress forward
+        assert current_chunk["start_byte"] < next_chunk["start_byte"]

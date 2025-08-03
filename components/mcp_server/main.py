@@ -4,14 +4,14 @@ import argparse
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Optional
 
 from components.agentic_retriever import create_agentic_query_engine
 from components.file_watcher.file_watcher import VaultWatcher
 from components.vector_store.vector_store import VectorStore
 from fastapi import FastAPI, HTTPException, Query
 from llama_index.core.schema import MetadataMode
-from vault_mcp.config import load_config
+from vault_mcp.config import Config, load_config
 from vault_mcp.document_processor import DocumentProcessor
 
 from .models import (
@@ -29,24 +29,24 @@ log_level = os.getenv("LOG_LEVEL", "INFO")
 logging.basicConfig(level=getattr(logging, log_level.upper()))
 logger = logging.getLogger(__name__)
 
-# Load configuration
-config = load_config()
-
-# Initialize global components
-vector_store: VectorStore | None = None  # Will be initialized in lifespan
-processor = DocumentProcessor(
-    chunk_size=config.indexing.chunk_size, chunk_overlap=config.indexing.chunk_overlap
-)
-file_watcher = None
-
-# LlamaIndex components (initialized in lifespan)
-query_engine = None
+# Declare global components but do not initialize them yet.
+# They will be initialized in the main() function after config is loaded.
+config: Optional[Config] = None
+vector_store: Optional[VectorStore] = None
+processor: Optional[DocumentProcessor] = None
+file_watcher: Optional[VaultWatcher] = None
+query_engine: Optional[Any] = None  # Using Any for LlamaIndex query_engine
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> Any:
     """Manage application lifespan events."""
-    global vector_store, file_watcher, query_engine
+    global config, vector_store, file_watcher, query_engine
+
+    if config is None:
+        raise RuntimeError("Config not initialized")
+    if processor is None:
+        raise RuntimeError("DocumentProcessor not initialized")
 
     # Initialize the VectorStore here, using the final config
     vector_store = VectorStore(
@@ -85,7 +85,7 @@ async def initial_indexing() -> None:
     """Perform initial indexing of the vault."""
     logger.info("Starting initial vault indexing")
 
-    # Ensure vector_store is initialized
+    # Ensure vector_store and config are initialized
     if vector_store is None:
         raise RuntimeError(
             (
@@ -93,6 +93,10 @@ async def initial_indexing() -> None:
                 "during normal startup."
             )
         )
+    if config is None:
+        raise RuntimeError("Config not initialized")
+    if processor is None:
+        raise RuntimeError("DocumentProcessor not initialized")
 
     vault_path = config.get_vault_path()
     if not vault_path.exists():
@@ -129,7 +133,7 @@ async def setup_llamaindex() -> None:
     """Initialize LlamaIndex components."""
     global query_engine
 
-    # Ensure vector_store is initialized
+    # Ensure vector_store and config are initialized
     if vector_store is None:
         raise RuntimeError(
             (
@@ -137,6 +141,8 @@ async def setup_llamaindex() -> None:
                 "during normal startup."
             )
         )
+    if config is None:
+        raise RuntimeError("Config not initialized")
 
     query_engine = create_agentic_query_engine(
         config=config, vector_store=vector_store, similarity_top_k=10, max_workers=3
@@ -156,6 +162,8 @@ def get_mcp_info() -> MCPInfoResponse:
     """Provide info on server capabilities and configuration."""
     if vector_store is None:
         raise HTTPException(status_code=503, detail="Server is starting up")
+    if config is None:
+        raise HTTPException(status_code=503, detail="Config not initialized")
 
     return MCPInfoResponse(
         mcp_version="1.0",
@@ -224,6 +232,8 @@ def query_documents(request: QueryRequest) -> QueryResponse:
 
     if vector_store is None:
         raise HTTPException(status_code=503, detail="Server is starting up")
+    if config is None:
+        raise HTTPException(status_code=503, detail="Config not initialized")
 
     if query_engine is None:
         # Fallback to basic retrieval if LlamaIndex setup failed
@@ -255,6 +265,9 @@ def query_documents(request: QueryRequest) -> QueryResponse:
                         if hasattr(node, "score") and node.score is not None
                         else 0.0
                     ),
+                    start_byte=int(node.node.metadata.get("start_byte", 0)),
+                    end_byte=int(node.node.metadata.get("end_byte", 0)),
+                    original_text=str(node.node.metadata.get("original_text", "")),
                 )
                 sources.append(chunk_metadata)
 
@@ -322,17 +335,19 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # --- UPDATE THE GLOBAL CONFIG USING THE PARSED ARGS ---
-    global config
-    config = load_config(
-        config_dir=args.config,
-        app_config_path=args.app_config,
-        prompts_config_path=args.prompts_config,
-    )
+    # Load config from the provided path first.
+    global config, processor, vector_store
+    config = load_config(config_dir=args.config)
 
-    if args.database_dir:
-        config.paths.database_dir = args.database_dir
-        logger.info(f"Overriding database directory with: {config.paths.database_dir}")
+    # Now, initialize the other components using the loaded config.
+    processor = DocumentProcessor(
+        chunk_size=config.indexing.chunk_size,
+        chunk_overlap=config.indexing.chunk_overlap,
+    )
+    vector_store = VectorStore(
+        embedding_config=config.embedding_model,
+        persist_directory=config.paths.database_dir,
+    )
 
     logger.info(f"Starting server on {config.server.host}:{config.server.port}")
 

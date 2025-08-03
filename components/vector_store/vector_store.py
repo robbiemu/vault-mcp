@@ -88,6 +88,10 @@ class VectorStore:
                     "file_path": str(chunk["file_path"]),
                     "score": float(chunk["score"]),
                     "text_length": len(chunk["text"]),
+                    # Add the new metadata fields
+                    "start_byte": int(chunk.get("start_byte", 0)),
+                    "end_byte": int(chunk.get("end_byte", 0)),
+                    "original_text": str(chunk.get("original_text", "")),
                 }
             )
 
@@ -169,6 +173,10 @@ class VectorStore:
                                 file_path=str(metadata.get("file_path", "")),
                                 chunk_id=str(chunk_id),
                                 score=float(metadata.get("score") or 0),
+                                # Populate the new fields from metadata
+                                start_byte=int(metadata.get("start_byte") or 0),
+                                end_byte=int(metadata.get("end_byte") or 0),
+                                original_text=str(metadata.get("original_text") or ""),
                             )
                         )
 

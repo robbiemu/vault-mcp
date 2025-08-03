@@ -1,6 +1,6 @@
 # 🧾 Vault MCP - Obsidian Documentation Server
 
-**Version 0.2.2**
+**Version 0.2.3**
 
 A **Model Context Protocol (MCP)** compliant server that indexes, searches, and serves Obsidian vault documents with **semantic search (RAG)**, **live synchronization**, and **quality-based chunk filtering**.
 

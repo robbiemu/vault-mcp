@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vault-mcp"
-version = "0.2.2"
+version = "0.2.3"
 description = "MCP-compliant Obsidian documentation server with RAG and live sync"
 authors = [{name = "Vault MCP Team", email = "team@vault-mcp.dev"}]
 license = {text = "MIT"}

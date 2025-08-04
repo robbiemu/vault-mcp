@@ -1,19 +1,21 @@
 # 🧾 Vault MCP - Obsidian Documentation Server
 
-**Version 0.2.3**
+**Version 0.3.0**
 
-A **Model Context Protocol (MCP)** compliant server that indexes, searches, and serves Obsidian vault documents with **semantic search (RAG)**, **live synchronization**, and **quality-based chunk filtering**.
+A **Model Context Protocol (MCP)** compliant server that indexes, searches, and serves documents from multiple sources with **semantic search (RAG)**, **live synchronization**, **configurable post-processing**, and **quality-based chunk filtering**.
 
 ## ✨ Features
 
 - 🤖 **Retrieval-Augmented Generation (RAG)**: Enhanced document retrieval with text generation for comprehensive answers using context-aware AI models
-- 🔍 **Semantic Search**: Vector-based search across your Obsidian vault
+- 📚 **Flexible Ingestion**: Supports standard Markdown folders, Obsidian vaults, and Joplin notebooks
+- 🔍 **Semantic Search**: Vector-based search across your document collections
+- ⚡ **Configurable Post-Processing**: Choose between agentic (AI-enhanced) or static (fast, deterministic) retrieval modes
 - 📁 **Prefix Filtering**: Only index files matching specific filename prefixes
 - 🔄 **Live Sync**: Automatically re-indexes files when they change on disk
 - 📊 **Quality Scoring**: Filters document chunks based on content quality
 - 🔌 **MCP Compliant**: Follows Model Context Protocol standards
 - 🚀 **FastAPI Backend**: RESTful API with automatic documentation
-- 📝 **Markdown Processing**: Obsidian-friendly markdown parsing
+- 📝 **Markdown Processing**: Structure-aware parsing with LlamaIndex integration
 
 ## 📚 Table of Contents
 
@@ -47,7 +49,8 @@ graph TB
         end
         
         subgraph "Shared Utilities"
-            DP["📄 Document Processor"]
+            DL["📄 Document Loader<br/>(Multi-source)"]
+            QS["📊 Quality Scorer<br/>(Content-based)"]
             CF["⚙️ Configuration"]
         end
     end
@@ -58,8 +61,9 @@ graph TB
     
     %% Data flow connections
     OV -->|"Monitor .md files"| FW
-    FW -->|"Process changes"| DP
-    DP -->|"Generate chunks"| VS
+    FW -->|"Load & parse documents"| DL
+    DL -->|"Quality score chunks"| QS
+    QS -->|"Store chunks"| VS
     AI <-->|"HTTP/REST API (MCP Protocol)"| MS
     MS -->|"Search queries"| VS
     MS -->|"RAG queries"| AR
@@ -79,7 +83,7 @@ graph TB
     
     class MS,VS,FW,AR component
     class OV,AI,LLM external
-    class DP,CF utility
+    class DL,QS,CF utility
 ```
 
 ## 🚀 Quick Start
@@ -145,11 +149,16 @@ The server loads configuration from `config/app.toml`. You can either:
 Here are the most common settings to customize:
 
 ```toml
-# Update the vault path to point to your Obsidian vault
+# Configure your document source
 [paths]
-vault_dir = "/path/to/your/obsidian-vault"
+vault_dir = "/path/to/your/documents"
+type = "Obsidian"  # or "Standard" for plain Markdown, "Joplin" for Joplin notes
 
-# Override the generation model if desired
+# Choose retrieval processing mode
+[retrieval]
+mode = "agentic"  # or "static" for faster, deterministic processing
+
+# Override the generation model if desired (required for agentic mode)
 [generation_model]
 model_name = "gpt-4o-mini"  # or "claude-3-haiku-20240307", "ollama/mistral", etc.
 [generation_model.parameters]
@@ -279,7 +288,68 @@ Force a full re-index of the vault.
 ## ⚙️ Configuration Options
 
 ### Paths
-- `vault_dir`: Absolute path to your Obsidian vault directory
+- `vault_dir`: Absolute path to your document directory
+- `type`: Document source type - `"Standard"` (plain Markdown folder), `"Obsidian"` (Obsidian vault), or `"Joplin"` (Joplin notes)
+- `database_dir`: Directory to store the ChromaDB vector database
+
+### Document Source Types
+
+**Standard**: Plain Markdown files in a directory
+```toml
+[paths]
+vault_dir = "/path/to/markdown/files"
+type = "Standard"
+```
+
+**Obsidian**: Obsidian vault with wiki-links and metadata
+```toml
+[paths]
+vault_dir = "/path/to/obsidian/vault"
+type = "Obsidian"
+```
+
+**Joplin**: Joplin notebook via API
+```toml
+[paths]
+type = "Joplin"
+
+[joplin_config]
+api_token = "your-joplin-api-token"
+```
+
+### Joplin Configuration
+
+To use Joplin as a document source:
+
+1. **Enable Joplin Web Clipper**: Go to Tools → Options → Web Clipper, and enable it
+2. **Get API Token**: Copy the authorization token from the Web Clipper settings
+3. **Configure**: Add the token to your `app.toml`:
+
+```toml
+[joplin_config]
+api_token = "your-api-token-here"
+```
+
+### Retrieval Configuration
+
+- `mode`: Post-processing mode for retrieved chunks
+  - `"agentic"`: Use LLM agents to rewrite and enhance chunks (high quality, slower)
+  - `"static"`: Expand chunks to full section context (fast, deterministic)
+
+```toml
+[retrieval]
+mode = "static"  # Fast mode, no LLM required
+
+# generation_model section can be omitted in static mode
+```
+
+```toml
+[retrieval]
+mode = "agentic"  # High-quality mode
+
+[generation_model]  # Required for agentic mode
+model_name = "gpt-4o-mini"
+```
 
 ### Prefix Filter
 - `allowed_prefixes`: List of filename prefixes to include in indexing
@@ -429,7 +499,8 @@ vault-mcp/
 │       └── tests/           # Agent-specific tests
 ├── vault_mcp/               # Shared utilities and libraries
 │   ├── config.py            # Configuration management
-│   ├── document_processor.py # Markdown processing and chunking
+│   ├── document_loader.py   # Multi-source document loading
+│   ├── chunk_quality_scorer.py # Content-based chunk quality scoring
 │   └── __init__.py
 ├── tests/                   # Root-level integration tests
 ├── docs/
@@ -444,22 +515,29 @@ vault-mcp/
 
 ## 🧠 How It Works
 
-1. **Document Ingestion**: The server scans your Obsidian vault for `.md` files matching the configured prefixes.
+The server uses a modern two-stage ingestion pipeline built on LlamaIndex:
 
-2. **Markdown Processing**: Files are parsed to extract plain text while maintaining structure.
+1. **Document Loading**: The multi-source document loader reads from your configured source:
+   - **Standard**: Scans Markdown files in a directory using `SimpleDirectoryReader`
+   - **Obsidian**: Processes vault files with wiki-link resolution using `ObsidianReader`
+   - **Joplin**: Fetches notes via API using `JoplinReader`
 
-3. **Chunking and Quality Scoring**: Text is broken into chunks, scored for quality to filter valuable content.
+2. **Node Parsing**: Documents are processed through LlamaIndex's `MarkdownNodeParser` to:
+   - Preserve document structure and metadata
+   - Generate properly sized chunks with overlap
+   - Maintain character position tracking for section expansion
+
+3. **Quality Scoring**: Chunks are scored using content-based heuristics to filter valuable content.
 
 4. **Embedding and Storage**: High-quality chunks are embedded using sentence transformers and stored in ChromaDB.
 
-5. **Agentic Retrieval**: The `Agentic Retriever` conducts agent-driven retrieval and refinement:
-   - Searches relevant document chunks using `DocumentRAGTool`
-   - Refines informative content via `ChunkRewriteAgent`
-   - Manages concurrent processing with `ChunkRewriterPostprocessor`
+5. **Configurable Retrieval**: Based on your `retrieval.mode` setting:
+   - **Agentic Mode**: Uses `ChunkRewriteAgent` for AI-enhanced content refinement
+   - **Static Mode**: Expands chunks to full section context using `DocumentReader`
 
-6. **Live Sync and Query Handling**: A file watcher monitors the vault for changes, providing up-to-date search capabilities.
+6. **Live Sync**: A file watcher monitors your document source for changes, automatically re-indexing when files are modified.
 
-7. **Comprehensive Query Processing**: Queries are processed to deliver contextually rich and precise answers through a unified RAG pipeline.
+7. **Query Processing**: Queries are processed through the selected retrieval pipeline to deliver contextually relevant answers.
 
 ## 🎯 Use Cases
 

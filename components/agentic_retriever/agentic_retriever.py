@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
+from components.document_processing import (
+    FullDocumentRetrievalTool,
+    SectionRetrievalTool,
+)
 from llama_index.core import Settings, VectorStoreIndex
 from llama_index.core.agent import ReActAgent
 from llama_index.core.llms import LLM
@@ -16,10 +20,144 @@ from llama_index.core.tools import FunctionTool
 from llama_index.llms.litellm import LiteLLM
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from vault_mcp.config import Config
-from vault_mcp.document_tools import FullDocumentRetrievalTool, SectionRetrievalTool
 from vault_mcp.embedding_factory import create_embedding_model
 
 logger = logging.getLogger(__name__)
+
+
+class StaticContextPostprocessor(BaseNodePostprocessor):
+    """Postprocessor that expands retrieved chunks to their full section context."""
+
+    def __init__(self) -> None:
+        """Initialize the static context postprocessor."""
+        super().__init__()
+        from components.document_processing.document_tools import DocumentReader
+
+        self._document_reader = DocumentReader()
+
+    def _postprocess_nodes(
+        self, nodes: List[NodeWithScore], query_bundle: Optional[QueryBundle] = None
+    ) -> List[NodeWithScore]:
+        """Postprocess nodes by expanding each to its full section context.
+
+        Args:
+            nodes: The nodes to postprocess
+            query_bundle: The query bundle (unused in static mode)
+
+        Returns:
+            Postprocessed nodes with expanded section content
+        """
+        if not nodes:
+            return nodes
+
+        expanded_nodes = []
+        seen_sections = {}  # For deduplication: key -> NodeWithScore
+
+        for node in nodes:
+            try:
+                # Get the file path and character indices
+                file_path = node.node.metadata.get("file_path")
+                # Try to get character indices from metadata first (persisted), then node attributes (fallback)
+                start_char_idx = node.node.metadata.get("start_char_idx") or getattr(node.node, "start_char_idx", None)
+                end_char_idx = node.node.metadata.get("end_char_idx") or getattr(node.node, "end_char_idx", None)
+
+                logger.debug(
+                    f"Node {node.node.id_}: file_path={file_path}, "
+                    f"start_char_idx={start_char_idx}, end_char_idx={end_char_idx} "
+                    f"(from metadata: {node.node.metadata.get('start_char_idx')}, {node.node.metadata.get('end_char_idx')})"
+                )
+
+                if not file_path or start_char_idx is None or end_char_idx is None:
+                    logger.warning(
+                        f"Node {node.node.id_} missing required metadata, "
+                        f"keeping original (file_path={file_path}, start={start_char_idx}, end={end_char_idx})"
+                    )
+                    expanded_nodes.append(node)
+                    continue
+
+                # Get the full section context
+                section_content, section_start_idx, section_end_idx = self._document_reader.get_enclosing_sections(
+                    file_path, start_char_idx, end_char_idx
+                )
+                
+                # Log expansion results
+                original_length = len(node.node.text)
+                expanded_length = len(section_content)
+                logger.debug(
+                    f"Node {node.node.id_} expansion: original={original_length} chars, "
+                    f"expanded={expanded_length} chars ({expanded_length/original_length:.1f}x), "
+                    f"section range: {section_start_idx}-{section_end_idx}"
+                )
+                
+                # Check if we actually expanded
+                if section_content == node.node.text:
+                    logger.warning(
+                        f"Node {node.node.id_}: Section content identical to original chunk! "
+                        f"This suggests section boundaries exactly match chunk boundaries."
+                    )
+
+                # Create unique key for deduplication.
+                # Prefer deterministic keys based on file path and exact character range
+                # to avoid duplicates caused by minor whitespace differences.
+                if section_start_idx is not None and section_end_idx is not None:
+                    section_key = f"{file_path}:{section_start_idx}:{section_end_idx}"
+                else:
+                    # Fallback to content hash when indices are unavailable
+                    normalized = " ".join(section_content.split())  # collapse whitespace
+                    section_key = f"{file_path}:{hash(normalized)}"
+
+                if section_key not in seen_sections:
+                    # Create new node with section content and preserve character indices
+                    new_node = TextNode(
+                        text=section_content,
+                        metadata=node.node.metadata,
+                        id_=f"section_{node.node.id_}",
+                    )
+                    # Preserve the character indices from the expanded section
+                    new_node.start_char_idx = section_start_idx
+                    new_node.end_char_idx = section_end_idx
+
+                    expanded_node = NodeWithScore(node=new_node, score=node.score)
+                    seen_sections[section_key] = expanded_node
+                    expanded_nodes.append(expanded_node)
+                else:
+                    # Section already seen, keep the higher scoring one
+                    existing_node = seen_sections[section_key]
+                    if (
+                        node.score is not None
+                        and existing_node.score is not None
+                        and node.score > existing_node.score
+                    ):
+                        # Replace with higher scoring node
+                        new_replacement_node = TextNode(
+                            text=section_content,
+                            metadata=node.node.metadata,
+                            id_=f"section_{node.node.id_}",
+                        )
+                        # Preserve the character indices from the expanded section
+                        new_replacement_node.start_char_idx = section_start_idx
+                        new_replacement_node.end_char_idx = section_end_idx
+                        
+                        seen_sections[section_key] = NodeWithScore(
+                            node=new_replacement_node,
+                            score=node.score,
+                        )
+                        # Update in expanded_nodes list
+                        for i, exp_node in enumerate(expanded_nodes):
+                            if exp_node is existing_node:
+                                expanded_nodes[i] = seen_sections[section_key]
+                                break
+
+            except Exception as e:
+                logger.error(f"Error expanding node {node.node.id_}: {e}")
+                # Keep original node on error
+                expanded_nodes.append(node)
+
+        logger.info(
+            f"Expanded {len(nodes)} chunks to {len(expanded_nodes)} "
+            f"deduplicated sections"
+        )
+        return expanded_nodes
 
 
 class DocumentRAGTool:
@@ -338,13 +476,40 @@ class ChunkRewriterPostprocessor(BaseNodePostprocessor):
             return nodes
 
 
+class ExpandedSourceQueryEngine:
+    """Wrapper that ensures postprocessed nodes are returned in source_nodes."""
+    
+    def __init__(self, base_query_engine: BaseQueryEngine, postprocessor: BaseNodePostprocessor):
+        self.base_query_engine = base_query_engine
+        self.postprocessor = postprocessor
+    
+    def query(self, query_str: str) -> Any:
+        # Get the normal response
+        response = self.base_query_engine.query(query_str)
+        
+        # If we have source nodes, reprocess them to get expanded versions
+        if hasattr(response, 'source_nodes') and response.source_nodes:
+            from llama_index.core.schema import QueryBundle
+            query_bundle = QueryBundle(query_str=query_str)
+            
+            # Apply postprocessing to get expanded nodes
+            expanded_nodes = self.postprocessor.postprocess_nodes(
+                response.source_nodes, query_bundle
+            )
+            
+            # Replace the source nodes with expanded ones
+            response.source_nodes = expanded_nodes
+        
+        return response
+
+
 def create_agentic_query_engine(
     config: Config,
     vector_store: Any,  # VectorStore from components/vector_store
     similarity_top_k: int = 10,
     max_workers: int = 3,
 ) -> Optional[BaseQueryEngine]:
-    """Factory function to create a complete agentic query engine.
+    """Factory function to create a query engine with configurable post-processing.
 
     Args:
         config: Configuration object containing model and generation settings
@@ -353,22 +518,15 @@ def create_agentic_query_engine(
         max_workers: Maximum concurrent rewrite workers (default: 3)
 
     Returns:
-        Configured query engine ready for agentic RAG, or None if setup fails
+        Configured query engine ready for RAG, or None if setup fails
     """
     try:
-        logger.info("Creating agentic query engine")
+        logger.info(f"Creating query engine in '{config.retrieval.mode}' mode")
 
         # Create embedding model
         embedding_model = create_embedding_model(config.embedding_model)
 
-        # Set up LLM
-        llm = LiteLLM(
-            model=config.generation_model.model_name,
-            **config.generation_model.parameters,
-        )
-
-        # Set global settings
-        Settings.llm = llm
+        # Set global embedding model setting
         Settings.embed_model = embedding_model
 
         # Create ChromaVectorStore from existing ChromaDB collection
@@ -383,19 +541,59 @@ def create_agentic_query_engine(
             vector_store=llama_index_vector_store, embed_model=embedding_model
         )
 
-        # Create postprocessor for agentic rewriting
-        postprocessor = ChunkRewriterPostprocessor(
-            llm=llm, index=index, config=config, max_workers=max_workers
-        )
+        # Factory logic: Choose post-processor based on retrieval mode
+        postprocessor: Union[ChunkRewriterPostprocessor, StaticContextPostprocessor]
+        if config.retrieval.mode == "agentic":
+            # Set up LLM for agentic mode
+            if config.generation_model is None:
+                raise ValueError("generation_model is required for agentic mode")
 
-        # Create query engine with postprocessor
-        query_engine = index.as_query_engine(
+            llm = LiteLLM(
+                model=config.generation_model.model_name,
+                **config.generation_model.parameters,
+            )
+            Settings.llm = llm
+
+            # Create agentic postprocessor
+            postprocessor = ChunkRewriterPostprocessor(
+                llm=llm, index=index, config=config, max_workers=max_workers
+            )
+            logger.info("Using agentic postprocessor with LLM rewriting")
+
+        elif config.retrieval.mode == "static":
+            # Create static postprocessor (no LLM required)
+            postprocessor = StaticContextPostprocessor()
+            
+            # Set a dummy LLM to prevent LlamaIndex from trying to initialize OpenAI
+            # This is needed because index.as_query_engine() requires an LLM in Settings
+            from llama_index.core.llms import MockLLM
+            Settings.llm = MockLLM()
+            
+            logger.info("Using static postprocessor with section expansion")
+
+        else:
+            raise ValueError(
+                f"Invalid retrieval mode: {config.retrieval.mode}. "
+                f"Must be 'agentic' or 'static'"
+            )
+
+        # Create base query engine with the selected postprocessor
+        base_query_engine = index.as_query_engine(
             similarity_top_k=similarity_top_k, node_postprocessors=[postprocessor]
         )
 
-        logger.info("Agentic query engine created successfully")
+        # For static mode, wrap to ensure expanded nodes are returned in source_nodes
+        if config.retrieval.mode == "static":
+            query_engine = ExpandedSourceQueryEngine(base_query_engine, postprocessor)
+            logger.info("Wrapped with ExpandedSourceQueryEngine to return expanded sections")
+        else:
+            query_engine = base_query_engine
+
+        logger.info(
+            f"Query engine created successfully in '{config.retrieval.mode}' mode"
+        )
         return query_engine
 
     except Exception as e:
-        logger.error(f"Error creating agentic query engine: {e}")
+        logger.error(f"Error creating query engine: {e}")
         return None

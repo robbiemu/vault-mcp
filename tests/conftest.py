@@ -8,16 +8,17 @@ from typing import Generator
 
 import pytest
 from components.vector_store.vector_store import VectorStore
+from llama_index.core.node_parser import MarkdownNodeParser
 from vault_mcp.config import (
     Config,
     EmbeddingModelConfig,
     IndexingConfig,
+    JoplinConfig,
     PathsConfig,
     PrefixFilterConfig,
     ServerConfig,
     WatcherConfig,
 )
-from vault_mcp.document_processor import DocumentProcessor
 
 
 @pytest.fixture
@@ -79,20 +80,21 @@ These are my personal notes that shouldn't be indexed.
 def test_config(temp_vault_dir: Path) -> Config:
     """Create a test configuration."""
     return Config(
-        paths=PathsConfig(vault_dir=str(temp_vault_dir)),
+        paths=PathsConfig(vault_dir=str(temp_vault_dir), type="Standard"),
         prefix_filter=PrefixFilterConfig(allowed_prefixes=["Resource Balance Game"]),
         indexing=IndexingConfig(
             chunk_size=256, chunk_overlap=32, quality_threshold=0.5
         ),
         watcher=WatcherConfig(enabled=False),  # Disable for tests
         server=ServerConfig(host="127.0.0.1", port=8000),
+        joplin_config=JoplinConfig(),
     )
 
 
 @pytest.fixture
-def document_processor() -> DocumentProcessor:
-    """Create a document processor for testing."""
-    return DocumentProcessor(chunk_size=256, chunk_overlap=32)
+def markdown_node_parser() -> MarkdownNodeParser:
+    """Create a markdown node parser for testing."""
+    return MarkdownNodeParser(chunk_size=256, chunk_overlap=32)
 
 
 @pytest.fixture

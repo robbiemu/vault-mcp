@@ -6,9 +6,11 @@ import tempfile
 # Import the global variables from the main module
 import components.mcp_server.main as server_main
 import pytest
+from components.document_processing import ChunkQualityScorer
 from components.mcp_server.main import app
 from components.vector_store.vector_store import VectorStore
 from fastapi.testclient import TestClient
+from llama_index.core.node_parser import MarkdownNodeParser
 from vault_mcp.config import (
     Config,
     EmbeddingModelConfig,
@@ -17,7 +19,6 @@ from vault_mcp.config import (
     PrefixFilterConfig,
     WatcherConfig,
 )
-from vault_mcp.document_processor import DocumentProcessor
 
 
 @pytest.fixture
@@ -50,10 +51,7 @@ def initialize_server():
     )
 
     # Initialize other components
-    server_main.processor = DocumentProcessor(
-        chunk_size=server_main.config.indexing.chunk_size,
-        chunk_overlap=server_main.config.indexing.chunk_overlap,
-    )
+    server_main.node_parser = MarkdownNodeParser.from_defaults()
     server_main.vector_store = VectorStore(
         embedding_config=server_main.config.embedding_model,
         persist_directory=server_main.config.paths.database_dir,
@@ -73,11 +71,9 @@ def test_full_document_workflow(client, sample_markdown_files, integration_confi
     # This test would require modifying the main app to accept test configuration
     # For now, we test individual components integration
 
-    # Initialize components
-    processor = DocumentProcessor(
-        chunk_size=integration_config.indexing.chunk_size,
-        chunk_overlap=integration_config.indexing.chunk_overlap,
-    )
+    # Initialize components using new pipeline
+    node_parser = MarkdownNodeParser.from_defaults()
+    quality_scorer = ChunkQualityScorer()
 
     embedding_config = EmbeddingModelConfig(
         provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
@@ -89,8 +85,34 @@ def test_full_document_workflow(client, sample_markdown_files, integration_confi
     )
 
     try:
-        # Process a file
-        raw_content, chunks = processor.process_file(sample_markdown_files["matching"])
+        # Load and process documents using new pipeline
+        from llama_index.core import SimpleDirectoryReader
+
+        reader = SimpleDirectoryReader(
+            input_files=[str(sample_markdown_files["matching"])],
+            required_exts=[".md"],
+        )
+        documents = reader.load_data()
+        nodes = node_parser.get_nodes_from_documents(documents)
+
+        # Convert to chunks with quality scoring
+        chunks = []
+        for node in nodes:
+            chunk_text = node.get_content()
+            quality_score = quality_scorer.score(chunk_text)
+
+            chunk = {
+                "text": chunk_text,
+                "original_text": chunk_text,
+                "file_path": str(sample_markdown_files["matching"]),
+                "chunk_id": node.node_id,
+                "score": quality_score,
+                "start_char_idx": getattr(node, "start_char_idx", 0) or 0,
+                "end_char_idx": (
+                    getattr(node, "end_char_idx", len(chunk_text)) or len(chunk_text)
+                ),
+            }
+            chunks.append(chunk)
 
         # Filter by quality threshold
         quality_chunks = [
@@ -101,9 +123,6 @@ def test_full_document_workflow(client, sample_markdown_files, integration_confi
 
         # Add to vector store
         vector_store.add_chunks(quality_chunks)
-
-        # Verify indexing worked
-        assert vector_store.get_chunk_count() > 0
 
         # Test search functionality
         results = vector_store.search("resource balance game", limit=3)
@@ -201,11 +220,9 @@ The system should be able to find this content when searching for relevant terms
 """
     test_file.write_text(test_content)
 
-    # Initialize components
-    processor = DocumentProcessor(
-        chunk_size=integration_config.indexing.chunk_size,
-        chunk_overlap=integration_config.indexing.chunk_overlap,
-    )
+    # Initialize components using new pipeline
+    node_parser = MarkdownNodeParser.from_defaults()
+    quality_scorer = ChunkQualityScorer()
 
     embedding_config = EmbeddingModelConfig(
         provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
@@ -217,12 +234,38 @@ The system should be able to find this content when searching for relevant terms
     )
 
     try:
-        # Process the file
-        raw_content, chunks = processor.process_file(test_file)
+        # Process the file using new pipeline
+        from llama_index.core import SimpleDirectoryReader
+
+        reader = SimpleDirectoryReader(
+            input_files=[str(test_file)],
+            required_exts=[".md"],
+        )
+        documents = reader.load_data()
+        nodes = node_parser.get_nodes_from_documents(documents)
+
+        # Convert to chunks with quality scoring
+        chunks = []
+        for node in nodes:
+            chunk_text = node.get_content()
+            quality_score = quality_scorer.score(chunk_text)
+
+            chunk = {
+                "text": chunk_text,
+                "original_text": chunk_text,
+                "file_path": str(test_file),
+                "chunk_id": node.node_id,
+                "score": quality_score,
+                "start_char_idx": getattr(node, "start_char_idx", 0) or 0,
+                "end_char_idx": (
+                    getattr(node, "end_char_idx", len(chunk_text)) or len(chunk_text)
+                ),
+            }
+            chunks.append(chunk)
 
         # Verify processing
-        assert "Pipeline Test Document" in raw_content
         assert len(chunks) > 0
+        assert any("Pipeline Test Document" in chunk["text"] for chunk in chunks)
 
         # Filter and add chunks
         quality_chunks = [

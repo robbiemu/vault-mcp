@@ -15,12 +15,13 @@ class ChunkMetadata(BaseModel):
     chunk_id: str = Field(..., description="Unique identifier for the chunk")
     score: float = Field(..., description="Quality or relevance score of the chunk")
 
-    # --- ADD THESE NEW FIELDS ---
-    start_byte: int = Field(
-        ..., description="The starting byte offset of the chunk in the original file"
+    # Character offsets for document exploration
+    start_char_idx: int = Field(
+        ...,
+        description="The starting character offset of the chunk in the original file",
     )
-    end_byte: int = Field(
-        ..., description="The ending byte offset of the chunk in the original file"
+    end_char_idx: int = Field(
+        ..., description="The ending character offset of the chunk in the original file"
     )
     original_text: str = Field(
         ...,

@@ -6,12 +6,15 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
+from components.document_processing import ChunkQualityScorer, convert_nodes_to_chunks
 from components.vector_store.vector_store import VectorStore
-from vault_mcp.config import Config
-from vault_mcp.document_processor import DocumentProcessor
-from watchdog.events import (
-    FileSystemEventHandler,
+from llama_index.core import SimpleDirectoryReader
+from llama_index.core.node_parser import (
+    MarkdownNodeParser,
+    TokenTextSplitter,
 )
+from vault_mcp.config import Config
+from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 logger = logging.getLogger(__name__)
@@ -23,13 +26,13 @@ class VaultEventHandler(FileSystemEventHandler):
     def __init__(
         self,
         config: Config,
-        processor: DocumentProcessor,
+        node_parser: MarkdownNodeParser,
         vector_store: VectorStore,
         debounce_seconds: int = 2,
     ):
         super().__init__()
         self.config = config
-        self.processor = processor
+        self.node_parser = node_parser
         self.vector_store = vector_store
         self.debounce_seconds = debounce_seconds
 
@@ -122,8 +125,8 @@ class VaultEventHandler(FileSystemEventHandler):
                 if operation == "modified":
                     self.vector_store.remove_file_chunks(file_path)
 
-                # Process and add new chunks
-                _, chunks = self.processor.process_file(file_path_obj)
+                # Process and add new chunks using the new pipeline
+                chunks = self._process_single_file(file_path_obj)
                 if chunks:
                     # Filter chunks by quality threshold
                     if self.config.indexing.enable_quality_filter:
@@ -149,6 +152,88 @@ class VaultEventHandler(FileSystemEventHandler):
         except Exception as e:
             logger.error(f"Error processing {operation} for {file_path}: {e}")
 
+    def _process_single_file(self, file_path: Path) -> list:
+        """Process a single file using the new LlamaIndex pipeline."""
+        try:
+            # Use SimpleDirectoryReader to load just this single file
+            reader = SimpleDirectoryReader(
+                input_files=[str(file_path)],
+                required_exts=[".md"],
+            )
+            documents = reader.load_data()
+
+            if not documents:
+                logger.warning(f"No documents loaded from {file_path}")
+                return []
+
+            # --- APPLY THE SAME TWO-STAGE LOGIC HERE ---
+            # Stage 1: Structural parsing
+            logger.info("Stage 1: Structural parsing of documents.")
+            initial_nodes = self.node_parser.get_nodes_from_documents(documents)
+
+            if not initial_nodes:
+                logger.warning(
+                    f"No nodes generated from structural parsing {file_path}"
+                )
+                return []
+
+            # Stage 2: Size-based splitting
+            logger.info(
+                "Stage 2: Splitting nodes based on token-based size constraints."
+            )
+            size_splitter = TokenTextSplitter(
+                chunk_size=self.config.indexing.chunk_size,
+                chunk_overlap=self.config.indexing.chunk_overlap,
+            )
+
+            # Split nodes while preserving original character positions
+            final_nodes = []
+            for node in initial_nodes:
+                # Get the original character position within the full document
+                original_start = getattr(node, "start_char_idx", 0)
+                
+                # Convert node to document for processing
+                from llama_index.core.schema import Document
+
+                doc = Document(
+                    text=node.get_content(),
+                    metadata=node.metadata if hasattr(node, "metadata") else {},
+                )
+
+                # Split the document using TokenTextSplitter
+                split_nodes = size_splitter.get_nodes_from_documents([doc])
+
+                # Preserve original metadata and fix character positions
+                for split_node in split_nodes:
+                    if hasattr(node, "metadata"):
+                        split_node.metadata.update(node.metadata)
+                    
+                    # Fix character indices to be relative to the original document
+                    if hasattr(split_node, "start_char_idx") and split_node.start_char_idx is not None:
+                        split_node.start_char_idx += original_start
+                    if hasattr(split_node, "end_char_idx") and split_node.end_char_idx is not None:
+                        split_node.end_char_idx += original_start
+
+                final_nodes.extend(split_nodes)
+
+            if not final_nodes:
+                logger.warning(
+                    f"No final nodes generated after size splitting {file_path}"
+                )
+                return []
+
+            # Convert final nodes to chunks format compatible with vector store
+            quality_scorer = ChunkQualityScorer()
+            chunks = convert_nodes_to_chunks(
+                final_nodes, quality_scorer, default_file_path=str(file_path)
+            )
+
+            return chunks
+
+        except Exception as e:
+            logger.error(f"Error processing single file {file_path}: {e}")
+            return []
+
     def stop(self) -> None:
         """Stop the debounce worker thread."""
         self._stop_debounce.set()
@@ -160,10 +245,10 @@ class VaultWatcher:
     """Watches an Obsidian vault for file changes and updates the vector store."""
 
     def __init__(
-        self, config: Config, processor: DocumentProcessor, vector_store: VectorStore
+        self, config: Config, node_parser: MarkdownNodeParser, vector_store: VectorStore
     ):
         self.config = config
-        self.processor = processor
+        self.node_parser = node_parser
         self.vector_store = vector_store
 
         self.observer: Any = None
@@ -185,7 +270,7 @@ class VaultWatcher:
         # Create event handler
         self.event_handler = VaultEventHandler(
             self.config,
-            self.processor,
+            self.node_parser,
             self.vector_store,
             debounce_seconds=self.config.watcher.debounce_seconds,
         )

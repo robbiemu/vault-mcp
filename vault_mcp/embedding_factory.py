@@ -4,6 +4,7 @@ import logging
 from typing import Any, List, Protocol, cast
 
 from llama_index.core.embeddings import BaseEmbedding
+from pydantic import Field
 
 from vault_mcp.config import EmbeddingModelConfig
 
@@ -141,6 +142,10 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
 
     model_config = {"arbitrary_types_allowed": True}
 
+    # Define the fields that will be set dynamically
+    client: Any = Field(default=None, exclude=True)
+    api_model_name: str = Field(default="", exclude=True)
+
     def __init__(self, model_name: str, endpoint_url: str, api_key: str, **kwargs: Any):
         """Initialize OpenAI-compatible embedding client.
 
@@ -150,13 +155,11 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
             api_key: API key for authentication
             **kwargs: Additional arguments for BaseEmbedding
         """
-        super().__init__(model_name=model_name, **kwargs)
         try:
             from openai import OpenAI
 
             client = OpenAI(api_key=api_key, base_url=endpoint_url)
-            object.__setattr__(self, "client", client)
-            object.__setattr__(self, "_model_name", model_name)
+            model_name_attr = model_name
             logger.info(
                 f"Initialized OpenAI-compatible client for {model_name} "
                 f"at {endpoint_url}"
@@ -166,11 +169,15 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
                 "openai is required for this provider. Install with: pip install openai"
             ) from e
 
+        super().__init__(model_name=model_name, **kwargs)
+        object.__setattr__(self, "client", client)
+        object.__setattr__(self, "api_model_name", model_name_attr)
+
     def encode(self, texts: List[str]) -> List[List[float]]:
         """Encode texts into embeddings using OpenAI-compatible API."""
         try:
             response = self.client.embeddings.create(
-                model=self._model_name, input=texts
+                model=self.api_model_name, input=texts
             )
             return [embedding.embedding for embedding in response.data]
         except Exception as e:
@@ -182,7 +189,7 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
         """Get query embedding."""
         try:
             response = self.client.embeddings.create(
-                model=self._model_name, input=[query]
+                model=self.api_model_name, input=[query]
             )
             return cast(List[float], response.data[0].embedding)
         except Exception as e:
@@ -193,7 +200,7 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
         """Get text embedding."""
         try:
             response = self.client.embeddings.create(
-                model=self._model_name, input=[text]
+                model=self.api_model_name, input=[text]
             )
             return cast(List[float], response.data[0].embedding)
         except Exception as e:

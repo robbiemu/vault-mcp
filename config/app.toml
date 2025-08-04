@@ -2,7 +2,7 @@
 
 [paths]
 # Update this path to point to your Obsidian vault
-vault_dir = "/absolute/path/to/obsidian-vault"
+vault_dir = "/Users/Shared/Public/Github/vault-mcp/test_vault"
 # Directory to store the ChromaDB vector database.
 # It is strongly recommended to use an absolute path.
 database_dir = "./chroma_db"
@@ -10,8 +10,11 @@ database_dir = "./chroma_db"
 [prefix_filter]
 # Optional: Only index files with these prefixes (empty list = include all .md files)
 allowed_prefixes = [
-  "Resource Balance Game",
-  "Decentralized Multiplayer Game System"
+  # Only index files starting with these prefixes
+  "AI",
+  "Machine"
+  # "Resource Balance Game",
+  # "Decentralized Multiplayer Game System"
   # Add more prefixes as needed:
   # "Project Documentation",
   # "Meeting Notes", 
@@ -19,8 +22,8 @@ allowed_prefixes = [
 ]
 
 [indexing]
-chunk_size = 512
-chunk_overlap = 64
+chunk_size = 150  # Small chunks to test section expansion
+chunk_overlap = 20
 quality_threshold = 0.75
 # Enable to filter out low-quality chunks based on the quality_threshold.
 # Recommended for "noisy" source data, but off by default to ensure all
@@ -64,6 +67,12 @@ model_name = "ollama/llama3"
 [generation_model.parameters]
 temperature = 0.5
 max_tokens = 1024
+
+[retrieval]
+# Choose retrieval mode: "static" or "agentic"
+# - static: Return full sections containing matched chunks (no LLM required)
+# - agentic: Use LLM to rewrite chunks for relevance (requires generation_model)
+mode = "static"
 
 # ===== EXAMPLE CONFIGURATIONS =====
 # Copy any of these to your config's app.toml to override the defaults:

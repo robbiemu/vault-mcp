@@ -7,12 +7,22 @@ from contextlib import asynccontextmanager
 from typing import Any, Optional
 
 from components.agentic_retriever import create_agentic_query_engine
+from components.document_processing import (
+    ChunkQualityScorer,
+    DocumentLoaderError,
+    convert_nodes_to_chunks,
+    load_documents,
+)
 from components.file_watcher.file_watcher import VaultWatcher
 from components.vector_store.vector_store import VectorStore
 from fastapi import FastAPI, HTTPException, Query
+from llama_index.core.node_parser import (
+    MarkdownNodeParser,
+    SentenceSplitter,
+    TokenTextSplitter,
+)
 from llama_index.core.schema import MetadataMode
 from vault_mcp.config import Config, load_config
-from vault_mcp.document_processor import DocumentProcessor
 
 from .models import (
     ChunkMetadata,
@@ -33,9 +43,11 @@ logger = logging.getLogger(__name__)
 # They will be initialized in the main() function after config is loaded.
 config: Optional[Config] = None
 vector_store: Optional[VectorStore] = None
-processor: Optional[DocumentProcessor] = None
+node_parser: Optional[MarkdownNodeParser] = None
+size_splitter: Optional[SentenceSplitter] = None
 file_watcher: Optional[VaultWatcher] = None
 query_engine: Optional[Any] = None  # Using Any for LlamaIndex query_engine
+app: Optional[FastAPI] = None
 
 
 @asynccontextmanager
@@ -43,10 +55,11 @@ async def lifespan(_app: FastAPI) -> Any:
     """Manage application lifespan events."""
     global config, vector_store, file_watcher, query_engine
 
+    # Config should have been initialized by main() before starting the app
     if config is None:
-        raise RuntimeError("Config not initialized")
-    if processor is None:
-        raise RuntimeError("DocumentProcessor not initialized")
+        raise RuntimeError("Config not initialized - main() should have initialized it")
+    if node_parser is None:
+        raise RuntimeError("MarkdownNodeParser not initialized - main() should have initialized it")
 
     # Initialize the VectorStore here, using the final config
     vector_store = VectorStore(
@@ -65,7 +78,7 @@ async def lifespan(_app: FastAPI) -> Any:
 
     # Start file watcher if enabled
     if config.watcher.enabled:
-        file_watcher = VaultWatcher(config, processor, vector_store)
+        file_watcher = VaultWatcher(config, node_parser, vector_store)
         file_watcher.start()
         logger.info("File watcher started")
 
@@ -77,13 +90,11 @@ async def lifespan(_app: FastAPI) -> Any:
         file_watcher.stop()
 
 
-# Initialize FastAPI app with lifespan management
-app = FastAPI(title="MCP Documentation Server", lifespan=lifespan)
 
 
 async def initial_indexing() -> None:
-    """Perform initial indexing of the vault."""
-    logger.info("Starting initial vault indexing")
+    """Perform initial indexing of the vault using LlamaIndex pipeline."""
+    logger.info("Starting initial vault indexing with LlamaIndex pipeline")
 
     # Ensure vector_store and config are initialized
     if vector_store is None:
@@ -95,38 +106,143 @@ async def initial_indexing() -> None:
         )
     if config is None:
         raise RuntimeError("Config not initialized")
-    if processor is None:
-        raise RuntimeError("DocumentProcessor not initialized")
+    if node_parser is None:
+        raise RuntimeError("MarkdownNodeParser not initialized")
 
-    vault_path = config.get_vault_path()
-    if not vault_path.exists():
-        logger.warning(f"Vault directory does not exist: {vault_path}")
-        return
+    try:
+        # Step 1: Load documents using the appropriate reader
+        documents = load_documents(config)
 
-    total_files = 0
-    for file_path in vault_path.glob("*.md"):
-        if config.should_include_file(file_path.name):
-            try:
-                _, chunks = processor.process_file(file_path)
+        if not documents:
+            logger.info(
+                "No documents found to index - starting with empty vector store"
+            )
+            return
 
-                # Filter chunks by quality threshold
-                if config.indexing.enable_quality_filter:
-                    quality_chunks = [
-                        chunk
-                        for chunk in chunks
-                        if chunk["score"] >= config.indexing.quality_threshold
-                    ]
+        # --- NEW TWO-STAGE LOGIC ---
+
+        # Stage 1: Perform structure-aware parsing to get initial nodes.
+        logger.info(
+            f"Stage 1: Structurally parsing {len(documents)} documents into nodes."
+        )
+        structural_parser = node_parser
+        initial_nodes = structural_parser.get_nodes_from_documents(documents)
+        logger.info(
+            (
+                f"Stage 1: Parsed {len(documents)} documents into "
+                f"{len(initial_nodes)} initial nodes."
+            )
+        )
+
+        # Stage 2: Apply size-based splitting to the initial nodes.
+        logger.info("Stage 2: Splitting nodes based on token-based size constraints.")
+        size_splitter = TokenTextSplitter(
+            chunk_size=config.indexing.chunk_size,
+            chunk_overlap=config.indexing.chunk_overlap,
+        )
+
+        # Split nodes while preserving original character positions
+        final_nodes = []
+        for node in initial_nodes:
+            # Get the original character position within the full document
+            # First check metadata (most reliable), then node attributes
+            original_start = node.metadata.get("start_char_idx") if hasattr(node, "metadata") else None
+            if original_start is None:
+                original_start = getattr(node, "start_char_idx", None)
+            
+            original_end = node.metadata.get("end_char_idx") if hasattr(node, "metadata") else None
+            if original_end is None:
+                original_end = getattr(node, "end_char_idx", None)
+            
+            # Convert node to document for processing
+            from llama_index.core.schema import Document
+
+            doc = Document(
+                text=node.get_content(),
+                metadata=node.metadata if hasattr(node, "metadata") else {},
+            )
+
+            # Split the document using TokenTextSplitter
+            split_nodes = size_splitter.get_nodes_from_documents([doc])
+
+            # Preserve original metadata and fix character positions
+            for split_node in split_nodes:
+                if hasattr(node, "metadata"):
+                    split_node.metadata.update(node.metadata)
+                
+                # Fix character indices to be relative to the original document
+                if original_start is not None:
+                    split_start = getattr(split_node, "start_char_idx", 0)
+                    split_end = getattr(split_node, "end_char_idx", len(split_node.get_content()))
+                    
+                    # Calculate the actual position in the original document
+                    split_node.start_char_idx = original_start + split_start
+                    split_node.end_char_idx = original_start + split_end
+                    
+                    # Always store in metadata so it persists to ChromaDB
+                    split_node.metadata["start_char_idx"] = split_node.start_char_idx
+                    split_node.metadata["end_char_idx"] = split_node.end_char_idx
                 else:
-                    quality_chunks = chunks
+                    # If we don't have original indices, use the split indices directly
+                    if hasattr(split_node, "start_char_idx") and split_node.start_char_idx is not None:
+                        split_node.metadata["start_char_idx"] = split_node.start_char_idx
+                    if hasattr(split_node, "end_char_idx") and split_node.end_char_idx is not None:
+                        split_node.metadata["end_char_idx"] = split_node.end_char_idx
 
-                if quality_chunks:
-                    vector_store.add_chunks(quality_chunks)
-                    total_files += 1
+            final_nodes.extend(split_nodes)
 
-            except Exception as e:
-                logger.error(f"Error processing {file_path}: {e}")
+        logger.info(
+            "Stage 2: Split %d nodes into %d final, size-constrained chunks.",
+            len(initial_nodes),
+            len(final_nodes),
+        )
 
-    logger.info(f"Initial indexing completed: {total_files} files processed")
+        # --- END NEW LOGIC ---
+
+        if not final_nodes:
+            logger.warning("No final nodes generated after splitting.")
+            return
+
+        # Step 3: Convert final nodes to chunks format compatible with vector store
+        logger.info(f"Converting {len(final_nodes)} final nodes to chunks")
+        quality_scorer = ChunkQualityScorer()
+        chunks = convert_nodes_to_chunks(
+            final_nodes, quality_scorer, default_file_path="document"
+        )
+
+        # Step 4: Filter chunks by quality threshold if enabled
+        if config.indexing.enable_quality_filter:
+            quality_chunks = [
+                chunk
+                for chunk in chunks
+                if chunk["score"] >= config.indexing.quality_threshold
+            ]
+            logger.info(
+                (
+                    f"Filtered {len(chunks)} chunks to "
+                    f"{len(quality_chunks)} based on quality threshold"
+                )
+            )
+        else:
+            quality_chunks = chunks
+
+        # Step 5: Add chunks to vector store
+        if quality_chunks:
+            vector_store.add_chunks(quality_chunks)
+            logger.info(
+                "Successfully indexed %d chunks from %d documents",
+                len(quality_chunks),
+                len(documents),
+            )
+        else:
+            logger.warning("No chunks passed quality filter")
+
+    except DocumentLoaderError as e:
+        logger.error(f"Document loading failed: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error during indexing: {e}")
+        raise
 
 
 async def setup_llamaindex() -> None:
@@ -157,7 +273,6 @@ async def setup_llamaindex() -> None:
         query_engine = None
 
 
-@app.get("/mcp/info", response_model=MCPInfoResponse)
 def get_mcp_info() -> MCPInfoResponse:
     """Provide info on server capabilities and configuration."""
     if vector_store is None:
@@ -181,12 +296,14 @@ def get_mcp_info() -> MCPInfoResponse:
             "quality_threshold": config.indexing.quality_threshold,
             "embedding_provider": config.embedding_model.provider,
             "embedding_model": config.embedding_model.model_name,
-            "generation_model": config.generation_model.model_name,
+            "generation_model": (
+                config.generation_model.model_name if config.generation_model else None
+            ),
+            "retrieval_mode": config.retrieval.mode,
         },
     )
 
 
-@app.get("/mcp/files", response_model=FileListResponse)
 def list_files() -> FileListResponse:
     """List all indexed files in the vector store."""
     if vector_store is None:
@@ -196,7 +313,6 @@ def list_files() -> FileListResponse:
     return FileListResponse(files=files, total_count=len(files))
 
 
-@app.get("/mcp/document", response_model=DocumentResponse)
 def get_document(
     file_path: str = Query(..., description="Path to the document"),
 ) -> DocumentResponse:
@@ -225,7 +341,6 @@ def get_document(
         ) from e
 
 
-@app.post("/mcp/query", response_model=QueryResponse)
 def query_documents(request: QueryRequest) -> QueryResponse:
     """Perform agentic RAG query using LlamaIndex."""
     global query_engine
@@ -265,8 +380,8 @@ def query_documents(request: QueryRequest) -> QueryResponse:
                         if hasattr(node, "score") and node.score is not None
                         else 0.0
                     ),
-                    start_byte=int(node.node.metadata.get("start_byte", 0)),
-                    end_byte=int(node.node.metadata.get("end_byte", 0)),
+                    start_char_idx=int(getattr(node.node, "start_char_idx", 0) or 0),
+                    end_char_idx=int(getattr(node.node, "end_char_idx", 0) or 0),
                     original_text=str(node.node.metadata.get("original_text", "")),
                 )
                 sources.append(chunk_metadata)
@@ -284,7 +399,6 @@ def query_documents(request: QueryRequest) -> QueryResponse:
         return QueryResponse(sources=results)
 
 
-@app.post("/mcp/reindex", response_model=ReindexResponse)
 async def reindex_documents() -> ReindexResponse:
     """Force a full reindex of documents from the vault."""
     if vector_store is None:
@@ -336,23 +450,32 @@ def main() -> None:
     args = parser.parse_args()
 
     # Load config from the provided path first.
-    global config, processor, vector_store
+    global config, node_parser, size_splitter
     config = load_config(config_dir=args.config)
 
-    # Now, initialize the other components using the loaded config.
-    processor = DocumentProcessor(
+    # Initialize parsers - MarkdownNodeParser for structure-aware parsing
+    # and SentenceSplitter for size-based chunking
+    node_parser = MarkdownNodeParser.from_defaults()
+    size_splitter = SentenceSplitter(
         chunk_size=config.indexing.chunk_size,
         chunk_overlap=config.indexing.chunk_overlap,
     )
-    vector_store = VectorStore(
-        embedding_config=config.embedding_model,
-        persist_directory=config.paths.database_dir,
-    )
+
+    # Initialize FastAPI app with lifespan management
+    global app
+    app = FastAPI(title="MCP Documentation Server", lifespan=lifespan)
+
+    # Register routes
+    app.get("/mcp/info", response_model=MCPInfoResponse)(get_mcp_info)
+    app.get("/mcp/files", response_model=FileListResponse)(list_files)
+    app.get("/mcp/document", response_model=DocumentResponse)(get_document)
+    app.post("/mcp/query", response_model=QueryResponse)(query_documents)
+    app.post("/mcp/reindex", response_model=ReindexResponse)(reindex_documents)
 
     logger.info(f"Starting server on {config.server.host}:{config.server.port}")
 
     uvicorn.run(
-        "components.mcp_server.main:app",
+        app,
         host=config.server.host,
         port=config.server.port,
         reload=False,

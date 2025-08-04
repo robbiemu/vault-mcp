@@ -5,14 +5,15 @@ import tempfile
 import pytest
 from components.vector_store.vector_store import VectorStore
 from fastapi.testclient import TestClient
+from llama_index.core.node_parser import MarkdownNodeParser
 from vault_mcp.config import (
     Config,
     IndexingConfig,
+    JoplinConfig,
     PathsConfig,
     PrefixFilterConfig,
     WatcherConfig,
 )
-from vault_mcp.document_processor import DocumentProcessor
 
 # Import the global variables from the main module
 from .. import main as server_main
@@ -24,7 +25,9 @@ def initialize_server():
     """Initialize server configuration and components for testing."""
     # Load the configuration
     server_main.config = Config(
-        paths=PathsConfig(vault_dir=str(tempfile.mkdtemp())),  # Temp dir for testing
+        paths=PathsConfig(
+            vault_dir=str(tempfile.mkdtemp()), type="Standard"  # Temp dir for testing
+        ),
         prefix_filter=PrefixFilterConfig(allowed_prefixes=["Resource Balance Game"]),
         indexing=IndexingConfig(
             chunk_size=200,
@@ -32,10 +35,11 @@ def initialize_server():
             quality_threshold=0.3,  # Lower threshold for testing
         ),
         watcher=WatcherConfig(enabled=False),  # Disable for integration tests
+        joplin_config=JoplinConfig(),
     )
 
     # Initialize other components
-    server_main.processor = DocumentProcessor(
+    server_main.node_parser = MarkdownNodeParser(
         chunk_size=server_main.config.indexing.chunk_size,
         chunk_overlap=server_main.config.indexing.chunk_overlap,
     )

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import toml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,10 @@ class PathsConfig(BaseModel):
     database_dir: str = Field(
         default="./chroma_db",
         description="Directory to store the ChromaDB vector database",
+    )
+    type: str = Field(
+        default="Standard",
+        description="Type of document source: Standard, Obsidian, Joplin",
     )
 
 
@@ -90,6 +94,22 @@ class GenerationModelConfig(BaseModel):
     )
 
 
+class RetrievalConfig(BaseModel):
+    """Configuration for retrieval post-processing."""
+
+    mode: str = Field(
+        default="agentic", description="Post-processing mode: 'agentic' or 'static'"
+    )
+
+
+class JoplinConfig(BaseModel):
+    """Configuration for Joplin integration."""
+
+    api_token: Optional[str] = Field(
+        default=None, description="API token for Joplin integration"
+    )
+
+
 class Config(BaseModel):
     """Main configuration model."""
 
@@ -99,13 +119,26 @@ class Config(BaseModel):
     watcher: WatcherConfig = Field(default_factory=WatcherConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     embedding_model: EmbeddingModelConfig = Field(default_factory=EmbeddingModelConfig)
-    generation_model: GenerationModelConfig = Field(
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    generation_model: Optional[GenerationModelConfig] = Field(
         default_factory=GenerationModelConfig
     )
+    joplin_config: JoplinConfig = Field(default_factory=JoplinConfig)
     # --- ADD THIS FIELD FOR PROMPTS ---
     prompts: Dict[str, Any] = Field(
         default_factory=dict, description="Loaded prompts from prompts.toml"
     )
+
+    @model_validator(mode="after")
+    def validate_generation_model_required(self) -> "Config":
+        """Validate that generation_model is provided when retrieval mode is agentic."""
+        if self.retrieval.mode == "agentic" and self.generation_model is None:
+            raise ValueError(
+                "generation_model configuration is required when "
+                "retrieval.mode is 'agentic'. Please provide [generation_model] "
+                "section in your configuration or set retrieval.mode to 'static'."
+            )
+        return self
 
     @classmethod
     def load_from_file(cls, config_path: str) -> "Config":

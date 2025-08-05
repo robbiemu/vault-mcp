@@ -72,7 +72,8 @@ class DocumentReader:
                 context_start = max(0, start_char_idx - 200)
                 context_end = min(len(content), end_char_idx + 200)
                 logger.debug(
-                    f"No headers found, returning context: {context_start} to {context_end}"
+                    f"No headers found, returning context: {context_start} to "
+                    f"{context_end}"
                 )
                 return content[context_start:context_end], context_start, context_end
 
@@ -156,9 +157,7 @@ class DocumentReader:
         Returns:
             Tuple of (section_start_char, section_end_char)
         """
-        logger.debug(
-            f"Finding section bounds for char starting at {start_char_idx}"
-        )
+        logger.debug(f"Finding section bounds for char starting at {start_char_idx}")
 
         # Special case: if there are no headers, return the whole document
         if not headers:
@@ -171,7 +170,8 @@ class DocumentReader:
             if header_pos <= start_char_idx:
                 start_header_idx = i
                 logger.debug(
-                    f"Found header before chunk start at idx {i}: pos={header_pos}, level={level}, text='{text[:30]}'"
+                    f"Found header before chunk start at idx {i}: pos={header_pos}, "
+                    f"level={level}, text='{text[:30]}'"
                 )
             else:
                 break
@@ -181,7 +181,8 @@ class DocumentReader:
             start_level = headers[start_header_idx][1]
             section_start = headers[start_header_idx][0]
             logger.debug(
-                f"Using header {start_header_idx} as section start: pos={section_start}, level={start_level}"
+                f"Using header {start_header_idx} as section start: "
+                f"pos={section_start}, level={start_level}"
             )
         else:
             logger.debug("Chunk starts before any header")
@@ -192,7 +193,8 @@ class DocumentReader:
                 if header_pos > start_char_idx:
                     first_header_after = i
                     logger.debug(
-                        f"First header after chunk at idx {i}: pos={header_pos}, level={level}, text='{text[:30]}'"
+                        f"First header after chunk at idx {i}: pos={header_pos}, "
+                        f"level={level}, text='{text[:30]}'"
                     )
                     break
 
@@ -201,7 +203,8 @@ class DocumentReader:
                 start_level = headers[first_header_after][1]
                 section_start = 0
                 logger.debug(
-                    f"Using document start as section start, level={start_level} from header {first_header_after}"
+                    f"Using document start as section start, level={start_level} "
+                    f"from header {first_header_after}"
                 )
             else:
                 # No headers after the chunk either, use the whole document
@@ -213,13 +216,15 @@ class DocumentReader:
         search_start_idx = start_header_idx + 1 if start_header_idx is not None else 0
 
         logger.debug(
-            f"Looking for section end starting from header idx {search_start_idx}, target level <= {start_level}"
+            f"Looking for section end starting from header idx {search_start_idx}, "
+            f"target level <= {start_level}"
         )
 
         for i in range(search_start_idx, len(headers)):
             header_pos, level, text = headers[i]
             logger.debug(
-                f"  Checking header {i}: pos={header_pos}, level={level}, text='{text[:30]}'"
+                f"  Checking header {i}: pos={header_pos}, level={level}, "
+                f"text='{text[:30]}'"
             )
             # We want the next header at the same level or higher (lower number)
             # if header_pos > end_char_idx and level <= start_level:
@@ -235,13 +240,52 @@ class DocumentReader:
         else:
             section_end = content_length
             logger.debug(
-                f"No suitable end header found, section ends at document end: {section_end}"
+                f"No suitable end header found, section ends at document end: "
+                f"{section_end}"
             )
 
         logger.debug(
-            f"Final section bounds: {section_start} to {section_end} (length: {section_end - section_start})"
+            f"Final section bounds: {section_start} to {section_end} "
+            f"(length: {section_end - section_start})"
         )
         return section_start, section_end
+
+    def get_section_headers(
+        self, file_path: str
+    ) -> Tuple[str, List[Tuple[int, int, str]]]:
+        """Get all section headers in the document with their structure.
+
+        Args:
+            file_path: Path to the document file
+
+        Returns:
+            Tuple of (formatted_headers_string, raw_headers_list)
+        """
+        try:
+            with open(file_path, "r", encoding="utf-8") as file:
+                content = file.read()
+
+            headers = self._find_markdown_headers(content)
+
+            if not headers:
+                return "No section headers found in document.", []
+
+            # Format headers in a readable structure
+            formatted_lines = []
+            formatted_lines.append("Document Structure:")
+            formatted_lines.append("===================\n")
+
+            for _pos, level, text in headers:
+                indent = "  " * (level - 1)  # Indent based on header level
+                formatted_lines.append(f"{indent}{'#' * level} {text}")
+
+            formatted_string = "\n".join(formatted_lines)
+            return formatted_string, headers
+
+        except Exception as e:
+            logger.error(f"Error getting section headers from {file_path}: {e}")
+            error_msg = f"Error getting section headers: {e}"
+            return error_msg, []
 
 
 class FullDocumentRetrievalTool:
@@ -290,3 +334,39 @@ class SectionRetrievalTool:
             file_path, start_char_idx, end_char_idx
         )
         return str(content)
+
+    def get_section_headers(self, file_path: str) -> str:
+        """Get all section headers in the document.
+
+        This provides an overview of the document structure to help agents
+        understand the content organization.
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            Formatted list of all section headers with their levels
+        """
+        headers_info, _ = self.reader.get_section_headers(file_path)
+        return str(headers_info)
+
+
+class SectionHeadersTool:
+    """Tool to retrieve document section headers for structure overview."""
+
+    def __init__(self) -> None:
+        self.reader = DocumentReader()
+
+    def get_section_headers(self, file_path: str) -> str:
+        """Get all section headers in the document.
+
+        This provides an overview of the document structure to help agents
+        understand the content organization and navigate effectively.
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            Formatted list of all section headers with their hierarchical structure
+        """
+        return self.reader.get_section_headers(file_path)[0]

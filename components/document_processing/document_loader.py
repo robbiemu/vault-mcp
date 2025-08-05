@@ -146,18 +146,21 @@ def load_documents(config: Config) -> List[Document]:
                 # No filtering needed - but still use our custom readers to ensure
                 # proper metadata handling (especially file_path for Obsidian)
                 if reader_type == "obsidian":
-                    # Always use our custom ObsidianReaderWithFilter to ensure file_path metadata
+                    # Always use our custom ObsidianReaderWithFilter to ensure
+                    # file_path metadata
                     reader = ObsidianReaderWithFilter(
                         input_dir=str(vault_path),
                         config=config,
                     )
                     logger.info(
-                        f"Loading documents with {reader.__class__.__name__} (no filtering)"
+                        f"Loading documents with {reader.__class__.__name__} "
+                        f"(no filtering)"
                     )
                 else:  # standard
                     reader = create_reader(config)
                     logger.info(
-                        f"Loading documents with {reader.__class__.__name__} (no filtering)"
+                        f"Loading documents with {reader.__class__.__name__} "
+                        f"(no filtering)"
                     )
 
             # 3. Load the documents

@@ -122,6 +122,7 @@ def test_vault_event_handler_file_creation(
     mock_node.node_id = "test_chunk_id"
     mock_node.start_char_idx = 0
     mock_node.end_char_idx = 18
+    mock_node.metadata = {}  # Add proper metadata dict
 
     # Mock the node parser to return mock nodes
     mock_node_parser.get_nodes_from_documents.return_value = [mock_node]
@@ -129,6 +130,7 @@ def test_vault_event_handler_file_creation(
     # Mock the reader to return mock documents
     mock_reader = Mock()
     mock_document = Mock()
+    mock_document.metadata = {}  # Add proper metadata dict
     mock_reader.load_data.return_value = [mock_document]
     mock_reader_class.return_value = mock_reader
 
@@ -187,6 +189,7 @@ def test_vault_event_handler_quality_filtering(
     mock_node.node_id = "test_chunk_id"
     mock_node.start_char_idx = 0
     mock_node.end_char_idx = 2
+    mock_node.metadata = {}  # Add proper metadata dict
 
     # Mock the node parser to return mock nodes
     mock_node_parser.get_nodes_from_documents.return_value = [mock_node]
@@ -194,6 +197,7 @@ def test_vault_event_handler_quality_filtering(
     # Mock the reader to return mock documents
     mock_reader = Mock()
     mock_document = Mock()
+    mock_document.metadata = {}  # Add proper metadata dict
     mock_reader.load_data.return_value = [mock_document]
     mock_reader_class.return_value = mock_reader
 
@@ -237,6 +241,7 @@ def test_vault_event_handler_quality_filtering_disabled(
     mock_node.node_id = "test_chunk_id"
     mock_node.start_char_idx = 0
     mock_node.end_char_idx = 2
+    mock_node.metadata = {}  # Add proper metadata dict
 
     # Mock the node parser to return mock nodes
     mock_node_parser.get_nodes_from_documents.return_value = [mock_node]
@@ -244,6 +249,7 @@ def test_vault_event_handler_quality_filtering_disabled(
     # Mock the reader to return mock documents
     mock_reader = Mock()
     mock_document = Mock()
+    mock_document.metadata = {}  # Add proper metadata dict
     mock_reader.load_data.return_value = [mock_document]
     mock_reader_class.return_value = mock_reader
 

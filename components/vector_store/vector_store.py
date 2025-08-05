@@ -6,9 +6,9 @@ from typing import Any, Dict, List, Mapping, Union, cast
 
 import chromadb
 from chromadb.config import Settings
+from components.embedding_system import EmbeddingModel, create_embedding_model
 from components.mcp_server.models import ChunkMetadata
 from vault_mcp.config import EmbeddingModelConfig
-from vault_mcp.embedding_factory import EmbeddingModel, create_embedding_model
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,7 @@ class VectorStore:
                     "start_char_idx": int(chunk.get("start_char_idx", 0)),
                     "end_char_idx": int(chunk.get("end_char_idx", 0)),
                     "original_text": str(chunk.get("original_text", "")),
+                    "document_id": str(chunk.get("document_id", "")),
                 }
             )
 
@@ -147,7 +148,7 @@ class VectorStore:
                 and results["distances"]
                 and results["distances"][0]
             ):
-                for i, (doc, metadata, _distance) in enumerate(
+                for i, (doc, metadata, distance) in enumerate(
                     zip(
                         results["documents"][0],
                         results["metadatas"][0],
@@ -155,34 +156,44 @@ class VectorStore:
                         strict=False,
                     )
                 ):
-                    # Filter by quality threshold
-                    score_value = metadata.get("score", 0)
-                    if (
-                        score_value is not None
-                        and float(score_value) >= quality_threshold
-                    ):
-                        chunk_id = (
-                            results["ids"][0][i]
-                            if results["ids"] and results["ids"][0]
-                            else f"chunk_{i}"
-                        )
+                    # 1. Filter by static quality score
+                    static_quality_score = metadata.get("score", 0.0)
+                    if static_quality_score is None:
+                        static_quality_score = 0.0
+                    if float(static_quality_score) < quality_threshold:
+                        continue
 
-                        chunks.append(
-                            ChunkMetadata(
-                                text=str(doc),
-                                file_path=str(metadata.get("file_path", "")),
-                                chunk_id=str(chunk_id),
-                                score=float(metadata.get("score") or 0),
-                                # Populate character offset fields from metadata
-                                start_char_idx=int(metadata.get("start_char_idx") or 0),
-                                end_char_idx=int(metadata.get("end_char_idx") or 0),
-                                original_text=str(metadata.get("original_text") or ""),
-                            )
-                        )
+                    # 2. Calculate relevance score for internal ranking
+                    relevance_score = 1.0 - distance
 
-            # Sort by score (quality) and limit results
-            chunks.sort(key=lambda x: x.score, reverse=True)
-            return chunks[:limit]
+                    chunk_id = (
+                        results["ids"][0][i]
+                        if results["ids"] and results["ids"][0]
+                        else f"chunk_{i}"
+                    )
+
+                    # Create chunk with original quality score preserved
+                    chunk = ChunkMetadata(
+                        text=str(doc),
+                        file_path=str(metadata.get("file_path", "")),
+                        chunk_id=str(chunk_id),
+                        score=float(
+                            static_quality_score
+                        ),  # Preserve original quality score
+                        # Populate character offset fields from metadata
+                        start_char_idx=int(metadata.get("start_char_idx") or 0),
+                        end_char_idx=int(metadata.get("end_char_idx") or 0),
+                        original_text=str(metadata.get("original_text") or ""),
+                    )
+
+                    # Store as tuple for sorting: (relevance_score, chunk)
+                    chunks.append((relevance_score, chunk))
+
+            # Sort by relevance score (first element of tuple) and extract chunks
+            chunks.sort(key=lambda x: x[0], reverse=True)
+
+            # Extract just the ChunkMetadata objects from the tuples
+            return [chunk for _, chunk in chunks[:limit]]
 
         except Exception as e:
             logger.error(f"Error searching vector store: {e}")

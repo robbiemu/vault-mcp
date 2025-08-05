@@ -191,7 +191,7 @@ class VaultEventHandler(FileSystemEventHandler):
             for node in initial_nodes:
                 # Get the original character position within the full document
                 original_start = getattr(node, "start_char_idx", 0)
-                
+
                 # Convert node to document for processing
                 from llama_index.core.schema import Document
 
@@ -207,11 +207,17 @@ class VaultEventHandler(FileSystemEventHandler):
                 for split_node in split_nodes:
                     if hasattr(node, "metadata"):
                         split_node.metadata.update(node.metadata)
-                    
+
                     # Fix character indices to be relative to the original document
-                    if hasattr(split_node, "start_char_idx") and split_node.start_char_idx is not None:
+                    if (
+                        hasattr(split_node, "start_char_idx")
+                        and split_node.start_char_idx is not None
+                    ):
                         split_node.start_char_idx += original_start
-                    if hasattr(split_node, "end_char_idx") and split_node.end_char_idx is not None:
+                    if (
+                        hasattr(split_node, "end_char_idx")
+                        and split_node.end_char_idx is not None
+                    ):
                         split_node.end_char_idx += original_start
 
                 final_nodes.extend(split_nodes)

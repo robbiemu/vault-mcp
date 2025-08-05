@@ -23,9 +23,13 @@ class ChunkMetadata(BaseModel):
     end_char_idx: int = Field(
         ..., description="The ending character offset of the chunk in the original file"
     )
-    original_text: str = Field(
-        ...,
+    original_text: Optional[str] = Field(
+        default=None,
         description="The original, unprocessed text of the chunk (raw Markdown)",
+    )
+    messages: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Optional messages, including error information",
     )
 
 
@@ -34,6 +38,16 @@ class QueryRequest(BaseModel):
 
     query: str = Field(..., description="The search query")
     limit: Optional[int] = Field(default=5, description="Maximum number of results")
+    instruction: Optional[str] = Field(
+        default=None,
+        description="An optional instruction for instruction-tuned embedding models.",
+    )
+    terse: Optional[bool] = Field(
+        default=True,
+        description="If true, omit original_text "
+        "when it's identical to text. "
+        "(default true)",
+    )
 
 
 class QueryResponse(BaseModel):
@@ -42,12 +56,6 @@ class QueryResponse(BaseModel):
     sources: List[ChunkMetadata] = Field(
         default_factory=list, description="Source chunks used for the answer"
     )
-
-
-class DocumentRequest(BaseModel):
-    """Request model for document retrieval."""
-
-    file_path: str = Field(..., description="Path to the requested document")
 
 
 class DocumentResponse(BaseModel):

@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 import pytest
 from components.agentic_retriever.agentic_retriever import (
     ChunkRewriteAgent,
-    DocumentRAGTool,
 )
 from llama_index.core.llms import LLM
 
@@ -17,34 +16,6 @@ def mock_llm():
     mock.callback_manager = None
     mock.completion_to_prompt = None
     return mock
-
-
-@pytest.fixture
-def mock_index():
-    """Create a mock index for testing."""
-    return MagicMock()
-
-
-@pytest.fixture
-def setup_document_rag_tool(mock_index):
-    """Setup a DocumentRAGTool for testing."""
-    return DocumentRAGTool(
-        index=mock_index,
-        document_id="test_document",
-        document_title="Test Document",
-    )
-
-
-def test_document_rag_tool_search(mock_index, setup_document_rag_tool):
-    """Test the search function of DocumentRAGTool."""
-    mock_retriever = MagicMock()
-    mock_node = MagicMock()
-    mock_node.node.get_content.return_value = "test content"
-    mock_retriever.retrieve.return_value = [mock_node]
-    mock_index.as_retriever.return_value = mock_retriever
-
-    result = setup_document_rag_tool.search_document("test query")
-    assert "Search results from 'Test Document':" in result
 
 
 @pytest.fixture
@@ -68,25 +39,6 @@ def test_chunk_rewrite_agent_attributes(mock_chunk_rewrite_agent):
     assert mock_chunk_rewrite_agent.query == "test query"
     assert isinstance(mock_chunk_rewrite_agent.all_chunks, list)
     assert isinstance(mock_chunk_rewrite_agent.doc_tools, list)
-
-
-def test_document_rag_tool_initialization():
-    """Test DocumentRAGTool initialization."""
-    mock_index = MagicMock()
-    tool = DocumentRAGTool(
-        index=mock_index, document_id="test_doc", document_title="Test Title"
-    )
-    assert tool.index == mock_index
-    assert tool.document_id == "test_doc"
-    assert tool.document_title == "Test Title"
-
-
-def test_document_rag_tool_search_error(setup_document_rag_tool):
-    """Test DocumentRAGTool search with error."""
-    setup_document_rag_tool.index.as_retriever.side_effect = Exception("Test error")
-
-    result = setup_document_rag_tool.search_document("test query")
-    assert "Error searching document:" in result
 
 
 def test_chunk_rewrite_agent_prompt_creation():

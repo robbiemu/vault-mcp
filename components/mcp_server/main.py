@@ -1,6 +1,7 @@
 """HTTP server and FastAPI endpoints for MCP server."""
 
 import argparse
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -13,13 +14,14 @@ from components.document_processing import (
     convert_nodes_to_chunks,
     load_documents,
 )
+from components.embedding_system import create_embedding_model
 from components.file_watcher.file_watcher import VaultWatcher
 from components.vector_store.vector_store import VectorStore
 from fastapi import FastAPI, HTTPException, Query
+from llama_index.core.embeddings import BaseEmbedding
 from llama_index.core.node_parser import (
     MarkdownNodeParser,
     SentenceSplitter,
-    TokenTextSplitter,
 )
 from llama_index.core.schema import MetadataMode
 from vault_mcp.config import Config, load_config
@@ -44,22 +46,36 @@ logger = logging.getLogger(__name__)
 config: Optional[Config] = None
 vector_store: Optional[VectorStore] = None
 node_parser: Optional[MarkdownNodeParser] = None
-size_splitter: Optional[SentenceSplitter] = None
 file_watcher: Optional[VaultWatcher] = None
 query_engine: Optional[Any] = None  # Using Any for LlamaIndex query_engine
-app: Optional[FastAPI] = None
+embedding_model: Optional[BaseEmbedding] = None  # Declare embedding_model as global
+
+# Create app at module level for testing compatibility
+app = FastAPI(title="MCP Documentation Server")
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> Any:
     """Manage application lifespan events."""
-    global config, vector_store, file_watcher, query_engine
+    global config, vector_store, file_watcher, query_engine, embedding_model
 
     # Config should have been initialized by main() before starting the app
     if config is None:
         raise RuntimeError("Config not initialized - main() should have initialized it")
     if node_parser is None:
-        raise RuntimeError("MarkdownNodeParser not initialized - main() should have initialized it")
+        raise RuntimeError(
+            "MarkdownNodeParser not initialized - main() should have initialized it"
+        )
+
+    # Initialize the embedding model before vector store
+    embedding_model = create_embedding_model(config.embedding_model)
+    logger.info(
+        (
+            f"Initialized embedding model: "
+            f"{config.embedding_model.provider}/"
+            f"{config.embedding_model.model_name}"
+        )
+    )
 
     # Initialize the VectorStore here, using the final config
     vector_store = VectorStore(
@@ -88,8 +104,6 @@ async def lifespan(_app: FastAPI) -> Any:
     logger.info("Shutting down Vault MCP Server")
     if file_watcher:
         file_watcher.stop()
-
-
 
 
 async def initial_indexing() -> None:
@@ -135,8 +149,10 @@ async def initial_indexing() -> None:
         )
 
         # Stage 2: Apply size-based splitting to the initial nodes.
-        logger.info("Stage 2: Splitting nodes based on token-based size constraints.")
-        size_splitter = TokenTextSplitter(
+        logger.info(
+            "Stage 2: Splitting nodes based on sentence-based size constraints."
+        )
+        size_splitter = SentenceSplitter(
             chunk_size=config.indexing.chunk_size,
             chunk_overlap=config.indexing.chunk_overlap,
         )
@@ -146,50 +162,53 @@ async def initial_indexing() -> None:
         for node in initial_nodes:
             # Get the original character position within the full document
             # First check metadata (most reliable), then node attributes
-            original_start = node.metadata.get("start_char_idx") if hasattr(node, "metadata") else None
+            original_start = node.metadata.get("start_char_idx")
             if original_start is None:
                 original_start = getattr(node, "start_char_idx", None)
-            
-            original_end = node.metadata.get("end_char_idx") if hasattr(node, "metadata") else None
+
+            original_end = node.metadata.get("end_char_idx")
             if original_end is None:
                 original_end = getattr(node, "end_char_idx", None)
-            
-            # Convert node to document for processing
+
+            # Create a temporary document from the node for splitting
             from llama_index.core.schema import Document
 
-            doc = Document(
+            temp_doc = Document(
                 text=node.get_content(),
-                metadata=node.metadata if hasattr(node, "metadata") else {},
+                metadata=node.metadata,
             )
 
-            # Split the document using TokenTextSplitter
-            split_nodes = size_splitter.get_nodes_from_documents([doc])
+            # Split the document using the sentence splitter
+            split_nodes = size_splitter.get_nodes_from_documents([temp_doc])
 
-            # Preserve original metadata and fix character positions
+            # For each split node, calculate the correct character indices
             for split_node in split_nodes:
-                if hasattr(node, "metadata"):
-                    split_node.metadata.update(node.metadata)
-                
-                # Fix character indices to be relative to the original document
-                if original_start is not None:
-                    split_start = getattr(split_node, "start_char_idx", 0)
-                    split_end = getattr(split_node, "end_char_idx", len(split_node.get_content()))
-                    
-                    # Calculate the actual position in the original document
-                    split_node.start_char_idx = original_start + split_start
-                    split_node.end_char_idx = original_start + split_end
-                    
-                    # Always store in metadata so it persists to ChromaDB
-                    split_node.metadata["start_char_idx"] = split_node.start_char_idx
-                    split_node.metadata["end_char_idx"] = split_node.end_char_idx
-                else:
-                    # If we don't have original indices, use the split indices directly
-                    if hasattr(split_node, "start_char_idx") and split_node.start_char_idx is not None:
-                        split_node.metadata["start_char_idx"] = split_node.start_char_idx
-                    if hasattr(split_node, "end_char_idx") and split_node.end_char_idx is not None:
-                        split_node.metadata["end_char_idx"] = split_node.end_char_idx
+                # Get the split node's relative positions within the parent node
+                split_start = getattr(split_node, "start_char_idx", 0) or 0
+                split_end = getattr(split_node, "end_char_idx", 0) or 0
 
-            final_nodes.extend(split_nodes)
+                # Calculate the final character indices relative to the original
+                # document
+                if original_start is not None:
+                    final_start = original_start + split_start
+                    final_end = original_start + split_end
+                else:
+                    final_start = split_start
+                    final_end = split_end
+
+                # Store the calculated indices in the node's metadata
+                # to ensure they are persisted
+                split_node.metadata["start_char_idx"] = final_start
+                split_node.metadata["end_char_idx"] = final_end
+
+                # Also set the node attributes for compatibility
+                # (with proper type checking)
+                if hasattr(split_node, "start_char_idx"):
+                    split_node.start_char_idx = final_start
+                if hasattr(split_node, "end_char_idx"):
+                    split_node.end_char_idx = final_end
+
+                final_nodes.append(split_node)
 
         logger.info(
             "Stage 2: Split %d nodes into %d final, size-constrained chunks.",
@@ -357,34 +376,107 @@ def query_documents(request: QueryRequest) -> QueryResponse:
         )
         results = vector_store.search(
             request.query,
-            limit=request.limit or 5,
+            limit=request.limit or config.server.default_query_limit,
             quality_threshold=config.indexing.quality_threshold,
         )
         return QueryResponse(sources=results)
 
     try:
         # Use LlamaIndex agentic query engine
-        response = query_engine.query(request.query)
+        query_str = request.query
+        if request.instruction:
+            query_payload = {"instruction": request.instruction, "query": request.query}
+            query_str = json.dumps(query_payload)
+
+        response = query_engine.query(query_str)
 
         # Extract source information from the response
         sources = []
         if hasattr(response, "source_nodes"):
-            for node in response.source_nodes:
-                # Convert LlamaIndex node back to our ChunkMetadata format
-                chunk_metadata = ChunkMetadata(
-                    text=node.node.get_content(metadata_mode=MetadataMode.NONE),
-                    file_path=node.node.metadata.get("file_path", ""),
-                    chunk_id=node.node.id_,
-                    score=float(
-                        node.score
-                        if hasattr(node, "score") and node.score is not None
-                        else 0.0
-                    ),
-                    start_char_idx=int(getattr(node.node, "start_char_idx", 0) or 0),
-                    end_char_idx=int(getattr(node.node, "end_char_idx", 0) or 0),
-                    original_text=str(node.node.metadata.get("original_text", "")),
-                )
-                sources.append(chunk_metadata)
+            # Limit the number of source nodes to the requested limit or config default
+            limit = request.limit or config.server.default_query_limit
+            limited_nodes = response.source_nodes[:limit]
+
+            for node in limited_nodes:
+                try:
+                    # Get character indices from metadata first (most reliable),
+                    #  then node attributes
+                    start_char_idx = node.node.metadata.get("start_char_idx")
+                    if start_char_idx is None:
+                        start_char_idx = getattr(node.node, "start_char_idx", None)
+
+                    end_char_idx = node.node.metadata.get("end_char_idx")
+                    if end_char_idx is None:
+                        end_char_idx = getattr(node.node, "end_char_idx", None)
+
+                    # Get text content and original_text
+                    text_content = node.node.get_content(
+                        metadata_mode=MetadataMode.NONE
+                    )
+                    original_text = node.node.metadata.get("original_text")
+
+                    # Handle terse mode: omit original_text if it's identical to text
+                    if (
+                        request.terse
+                        and original_text
+                        and text_content == original_text
+                    ):
+                        original_text = None
+
+                    # Convert LlamaIndex node back to our ChunkMetadata format
+                    chunk_metadata = ChunkMetadata(
+                        text=text_content,
+                        file_path=node.node.metadata.get("file_path", ""),
+                        chunk_id=node.node.id_,
+                        score=float(
+                            node.score
+                            if hasattr(node, "score") and node.score is not None
+                            else 0.0
+                        ),
+                        start_char_idx=int(start_char_idx or 0),
+                        end_char_idx=int(end_char_idx or 0),
+                        original_text=original_text,
+                    )
+                    sources.append(chunk_metadata)
+                except Exception as chunk_error:
+                    logger.error(
+                        f"Error processing chunk "
+                        f"{getattr(node.node, 'id_', 'unknown')}: "
+                        f"{chunk_error}"
+                    )
+                    # Create a fallback chunk with error information
+                    try:
+                        fallback_chunk = ChunkMetadata(
+                            text=node.node.metadata.get(
+                                "original_text",
+                                node.node.get_content(metadata_mode=MetadataMode.NONE),
+                            ),
+                            file_path=node.node.metadata.get("file_path", ""),
+                            chunk_id=getattr(node.node, "id_", "error_chunk"),
+                            score=float(
+                                node.score
+                                if hasattr(node, "score") and node.score is not None
+                                else 0.0
+                            ),
+                            start_char_idx=int(
+                                node.node.metadata.get("start_char_idx", 0)
+                            ),
+                            end_char_idx=int(node.node.metadata.get("end_char_idx", 0)),
+                            original_text=str(
+                                node.node.metadata.get("original_text", "")
+                            ),
+                            messages=[
+                                {
+                                    "error": f"An internal error "
+                                    f"prevented postprocessing "
+                                    f"this response: {str(chunk_error)}"
+                                }
+                            ],
+                        )
+                        sources.append(fallback_chunk)
+                    except Exception as fallback_error:
+                        logger.error(f"Error creating fallback chunk: {fallback_error}")
+                        # Continue processing other chunks
 
         return QueryResponse(sources=sources)
 
@@ -393,7 +485,7 @@ def query_documents(request: QueryRequest) -> QueryResponse:
         # Fallback to basic retrieval
         results = vector_store.search(
             request.query,
-            limit=request.limit or 5,
+            limit=request.limit or config.server.default_query_limit,
             quality_threshold=config.indexing.quality_threshold,
         )
         return QueryResponse(sources=results)
@@ -420,11 +512,19 @@ async def reindex_documents() -> ReindexResponse:
     )
 
 
+# Register routes at module level for testing compatibility
+app.get("/mcp/info", response_model=MCPInfoResponse)(get_mcp_info)
+app.get("/mcp/files", response_model=FileListResponse)(list_files)
+app.get("/mcp/document", response_model=DocumentResponse)(get_document)
+app.post("/mcp/query", response_model=QueryResponse)(query_documents)
+app.post("/mcp/reindex", response_model=ReindexResponse)(reindex_documents)
+
+
 def main() -> None:
     """Main entry point for the vault-mcp CLI."""
     import uvicorn
 
-    # --- ADD THIS PARSER BLOCK ---
+    # Parse command line arguments
     parser = argparse.ArgumentParser(
         description="MCP-compliant Obsidian documentation server."
     )
@@ -449,17 +549,20 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    # Load config from the provided path first.
-    global config, node_parser, size_splitter
-    config = load_config(config_dir=args.config)
-
-    # Initialize parsers - MarkdownNodeParser for structure-aware parsing
-    # and SentenceSplitter for size-based chunking
-    node_parser = MarkdownNodeParser.from_defaults()
-    size_splitter = SentenceSplitter(
-        chunk_size=config.indexing.chunk_size,
-        chunk_overlap=config.indexing.chunk_overlap,
+    # Load configuration
+    global config, node_parser
+    config = load_config(
+        config_dir=args.config,
+        app_config_path=args.app_config,
+        prompts_config_path=args.prompts_config,
     )
+
+    # Override database directory if provided
+    if args.database_dir:
+        config.paths.database_dir = args.database_dir
+
+    # Initialize MarkdownNodeParser for structure-aware parsing
+    node_parser = MarkdownNodeParser.from_defaults()
 
     # Initialize FastAPI app with lifespan management
     global app

@@ -9,6 +9,7 @@ from .document_loader import DocumentLoaderError, create_reader, load_documents
 from .document_tools import (
     DocumentReader,
     FullDocumentRetrievalTool,
+    SectionHeadersTool,
     SectionRetrievalTool,
 )
 from .node_converter import convert_nodes_to_chunks
@@ -29,4 +30,5 @@ __all__ = [
     "DocumentReader",
     "FullDocumentRetrievalTool",
     "SectionRetrievalTool",
+    "SectionHeadersTool",
 ]

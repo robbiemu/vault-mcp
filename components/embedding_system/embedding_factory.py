@@ -1,11 +1,9 @@
-"""Factory for creating embedding models with different backends."""
-
+import importlib
 import logging
 from typing import Any, List, Protocol, cast
 
 from llama_index.core.embeddings import BaseEmbedding
 from pydantic import Field
-
 from vault_mcp.config import EmbeddingModelConfig
 
 logger = logging.getLogger(__name__)
@@ -213,18 +211,20 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
 
 
 def create_embedding_model(config: EmbeddingModelConfig) -> BaseEmbedding:
-    """Factory function to create embedding models based on configuration.
+    """Factory function to create embedding models based on configuration."""
+    if hasattr(config, "wrapper_class") and config.wrapper_class:
+        try:
+            module_path, class_name = config.wrapper_class.rsplit(".", 1)
+            module = importlib.import_module(module_path)
+            wrapper_class = getattr(module, class_name)
+            return cast(BaseEmbedding, wrapper_class(config))
+        except (ImportError, AttributeError) as e:
+            logger.error(f"Failed to load wrapper class '{config.wrapper_class}': {e}")
+            raise ValueError(
+                f"Could not load wrapper class '{config.wrapper_class}'"
+            ) from e
 
-    Args:
-        config: Embedding model configuration
-
-    Returns:
-        Embedding model instance
-
-    Raises:
-        ValueError: If provider is not supported
-        ImportError: If required dependencies are not installed
-    """
+    # Fallback to original provider logic
     provider = config.provider.lower()
 
     if provider == "sentence_transformers":

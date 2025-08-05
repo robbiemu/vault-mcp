@@ -4,23 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from components.document_processing import (
     FullDocumentRetrievalTool,
+    SectionHeadersTool,
     SectionRetrievalTool,
 )
+from components.embedding_system import create_embedding_model
 from llama_index.core import Settings, VectorStoreIndex
 from llama_index.core.agent import ReActAgent
+from llama_index.core.callbacks.schema import CBEventType
 from llama_index.core.llms import LLM
 from llama_index.core.postprocessor.types import BaseNodePostprocessor
 from llama_index.core.query_engine import BaseQueryEngine
 from llama_index.core.schema import MetadataMode, NodeWithScore, QueryBundle, TextNode
-from llama_index.core.tools import FunctionTool
+from llama_index.core.tools import BaseTool, FunctionTool
 from llama_index.llms.litellm import LiteLLM
 from llama_index.vector_stores.chroma import ChromaVectorStore
 from vault_mcp.config import Config
-from vault_mcp.embedding_factory import create_embedding_model
 
 logger = logging.getLogger(__name__)
 
@@ -57,43 +59,54 @@ class StaticContextPostprocessor(BaseNodePostprocessor):
             try:
                 # Get the file path and character indices
                 file_path = node.node.metadata.get("file_path")
-                # Try to get character indices from metadata first (persisted), then node attributes (fallback)
-                start_char_idx = node.node.metadata.get("start_char_idx") or getattr(node.node, "start_char_idx", None)
-                end_char_idx = node.node.metadata.get("end_char_idx") or getattr(node.node, "end_char_idx", None)
+                # Try to get character indices from metadata first (persisted),
+                # then node attributes (fallback)
+                start_char_idx = node.node.metadata.get("start_char_idx") or getattr(
+                    node.node, "start_char_idx", None
+                )
+                end_char_idx = node.node.metadata.get("end_char_idx") or getattr(
+                    node.node, "end_char_idx", None
+                )
 
                 logger.debug(
                     f"Node {node.node.id_}: file_path={file_path}, "
                     f"start_char_idx={start_char_idx}, end_char_idx={end_char_idx} "
-                    f"(from metadata: {node.node.metadata.get('start_char_idx')}, {node.node.metadata.get('end_char_idx')})"
+                    f"(from metadata: {node.node.metadata.get('start_char_idx')}, "
+                    f"{node.node.metadata.get('end_char_idx')})"
                 )
 
                 if not file_path or start_char_idx is None or end_char_idx is None:
                     logger.warning(
                         f"Node {node.node.id_} missing required metadata, "
-                        f"keeping original (file_path={file_path}, start={start_char_idx}, end={end_char_idx})"
+                        f"keeping original (file_path={file_path}, "
+                        f"start={start_char_idx}, end={end_char_idx})"
                     )
                     expanded_nodes.append(node)
                     continue
 
                 # Get the full section context
-                section_content, section_start_idx, section_end_idx = self._document_reader.get_enclosing_sections(
-                    file_path, start_char_idx, end_char_idx
+                section_content, section_start_idx, section_end_idx = (
+                    self._document_reader.get_enclosing_sections(
+                        file_path, start_char_idx, end_char_idx
+                    )
                 )
-                
+
                 # Log expansion results
-                original_length = len(node.node.text)
+                original_length = len(node.node.get_content())
                 expanded_length = len(section_content)
                 logger.debug(
-                    f"Node {node.node.id_} expansion: original={original_length} chars, "
-                    f"expanded={expanded_length} chars ({expanded_length/original_length:.1f}x), "
+                    f"Node {node.node.id_} expansion: original={original_length} "
+                    f"chars, expanded={expanded_length} chars "
+                    f"({expanded_length / original_length:.1f}x), "
                     f"section range: {section_start_idx}-{section_end_idx}"
                 )
-                
+
                 # Check if we actually expanded
-                if section_content == node.node.text:
+                if section_content == node.node.get_content():
                     logger.warning(
-                        f"Node {node.node.id_}: Section content identical to original chunk! "
-                        f"This suggests section boundaries exactly match chunk boundaries."
+                        f"Node {node.node.id_}: Section content identical to original "
+                        f"chunk! This suggests section boundaries exactly match "
+                        f"chunk boundaries."
                     )
 
                 # Create unique key for deduplication.
@@ -103,17 +116,25 @@ class StaticContextPostprocessor(BaseNodePostprocessor):
                     section_key = f"{file_path}:{section_start_idx}:{section_end_idx}"
                 else:
                     # Fallback to content hash when indices are unavailable
-                    normalized = " ".join(section_content.split())  # collapse whitespace
+                    normalized = " ".join(
+                        section_content.split()
+                    )  # collapse whitespace
                     section_key = f"{file_path}:{hash(normalized)}"
 
                 if section_key not in seen_sections:
-                    # Create new node with section content and preserve character indices
+                    # Create new node with section content and preserve character
+                    # indices
                     new_node = TextNode(
                         text=section_content,
-                        metadata=node.node.metadata,
+                        metadata=node.node.metadata.copy(),
                         id_=f"section_{node.node.id_}",
                     )
+
                     # Preserve the character indices from the expanded section
+                    # Store in both metadata (for persistence) and node attributes
+                    #  (for compatibility)
+                    new_node.metadata["start_char_idx"] = section_start_idx
+                    new_node.metadata["end_char_idx"] = section_end_idx
                     new_node.start_char_idx = section_start_idx
                     new_node.end_char_idx = section_end_idx
 
@@ -131,13 +152,19 @@ class StaticContextPostprocessor(BaseNodePostprocessor):
                         # Replace with higher scoring node
                         new_replacement_node = TextNode(
                             text=section_content,
-                            metadata=node.node.metadata,
+                            metadata=node.node.metadata.copy(),
                             id_=f"section_{node.node.id_}",
                         )
                         # Preserve the character indices from the expanded section
+                        # Store in both metadata (for persistence) and node
+                        #  attributes (for compatibility)
+                        new_replacement_node.metadata["start_char_idx"] = (
+                            section_start_idx
+                        )
+                        new_replacement_node.metadata["end_char_idx"] = section_end_idx
                         new_replacement_node.start_char_idx = section_start_idx
                         new_replacement_node.end_char_idx = section_end_idx
-                        
+
                         seen_sections[section_key] = NodeWithScore(
                             node=new_replacement_node,
                             score=node.score,
@@ -158,55 +185,6 @@ class StaticContextPostprocessor(BaseNodePostprocessor):
             f"deduplicated sections"
         )
         return expanded_nodes
-
-
-class DocumentRAGTool:
-    """Tool for performing targeted searches within a single document."""
-
-    def __init__(self, index: VectorStoreIndex, document_id: str, document_title: str):
-        """Initialize the document RAG tool.
-
-        Args:
-            index: The vector store index to search
-            document_id: ID of the specific document to search within
-            document_title: Title of the document for context
-        """
-        self.index = index
-        self.document_id = document_id
-        self.document_title = document_title
-
-    def search_document(self, query: str, top_k: int = 5) -> str:
-        """Search for relevant content within the specific document.
-
-        Args:
-            query: The search query
-            top_k: Number of top results to return
-
-        Returns:
-            Formatted search results from the document
-        """
-        try:
-            # Create a retriever with document filtering
-            retriever = self.index.as_retriever(
-                similarity_top_k=top_k, filters={"document_id": self.document_id}
-            )
-
-            # Perform the search
-            nodes = retriever.retrieve(query)
-
-            # Format the results
-            results = []
-            for i, node in enumerate(nodes, 1):
-                content = node.node.get_content(metadata_mode=MetadataMode.NONE)
-                results.append(f"Result {i}: {content[:300]}...")
-
-            return f"Search results from '{self.document_title}':\n" + "\n\n".join(
-                results
-            )
-
-        except Exception as e:
-            logger.error(f"Error searching document {self.document_id}: {e}")
-            return f"Error searching document: {e}"
 
 
 class ChunkRewriteAgent:
@@ -235,8 +213,46 @@ class ChunkRewriteAgent:
         self.doc_tools = doc_tools
         self.config = config
 
-        # Create the agent with tools
-        self.agent = ReActAgent(tools=doc_tools, llm=llm, verbose=True)  # type: ignore[arg-type]
+        # Debug: Log tool information
+        logger.info(f"ChunkRewriteAgent initialized with {len(doc_tools)} tools:")
+        for i, tool in enumerate(doc_tools):
+            logger.info(
+                f"  Tool {i + 1}: {tool.metadata.name} - {tool.metadata.description}"
+            )
+
+        if not doc_tools:
+            logger.warning(
+                "ChunkRewriteAgent initialized with NO TOOLS - this will "
+                "cause tool calling failures!"
+            )
+
+        # Create the agent with tools and inherit global callback manager if available
+        from llama_index.core import Settings
+
+        # Safely get callback manager, defaulting to None if not set
+        callback_manager = getattr(Settings, "callback_manager", None)
+
+        # Only enable verbose mode when debugging is explicitly requested
+        is_debugging = callback_manager is not None
+
+        # Create agent with callback manager if it exists
+        tools_list: List[Union[BaseTool, Callable[..., Any]]] = list(doc_tools)
+        if is_debugging:
+            self.agent = ReActAgent(
+                tools=tools_list,
+                llm=llm,
+                verbose=True,
+                callback_manager=callback_manager,
+                max_iterations=self.config.retrieval.max_iterations,
+            )
+        else:
+            # Fallback without callback manager
+            self.agent = ReActAgent(
+                tools=tools_list,
+                llm=llm,
+                verbose=False,
+                max_iterations=self.config.retrieval.max_iterations,
+            )
 
     def _get_refinement_prompt(
         self, query: str, document_title: str, content: str, context_str: str
@@ -387,11 +403,39 @@ class ChunkRewriterPostprocessor(BaseNodePostprocessor):
             doc_tools = {}
             full_doc_tool = FullDocumentRetrievalTool()
             section_tool = SectionRetrievalTool()
+            headers_tool = SectionHeadersTool()
 
-            for node in nodes:
+            logger.info(f"Creating tools for {len(nodes)} nodes...")
+
+            for i, node in enumerate(nodes):
                 doc_id = node.node.metadata.get("document_id")
                 doc_title = node.node.metadata.get("title", "Unknown Document")
                 file_path = node.node.metadata.get("file_path")
+
+                logger.debug(
+                    f"Node {i + 1}/{len(nodes)} ({node.node.id_}): "
+                    f"doc_id='{doc_id}', title='{doc_title}', file_path='{file_path}'"
+                )
+                logger.debug(
+                    f"Node {i + 1} metadata keys: {list(node.node.metadata.keys())}"
+                )
+
+                if doc_id and doc_id not in doc_tools and file_path:
+                    logger.info(
+                        f"Creating tools for document: {doc_id} ({doc_title}) "
+                        "at {file_path}"
+                    )
+                elif not doc_id:
+                    logger.warning(
+                        f"Node {i + 1} missing document_id - cannot create tools"
+                    )
+                elif not file_path:
+                    logger.warning(
+                        f"Node {i + 1} missing file_path - cannot create tools "
+                        "(doc_id={doc_id})"
+                    )
+                elif doc_id in doc_tools:
+                    logger.debug(f"Tools already exist for doc_id: {doc_id}")
 
                 if doc_id and doc_id not in doc_tools and file_path:
                     # Create tool closures to capture the correct file_path
@@ -408,6 +452,12 @@ class ChunkRewriterPostprocessor(BaseNodePostprocessor):
                             )
 
                         return get_sections
+
+                    def make_headers_tool(path: str) -> Any:
+                        def get_headers(dummy_arg: str = "unused") -> str:
+                            return headers_tool.get_section_headers(path)
+
+                        return get_headers
 
                     # Create tools for this document
                     full_doc_function_tool = FunctionTool.from_defaults(
@@ -428,31 +478,72 @@ class ChunkRewriterPostprocessor(BaseNodePostprocessor):
                         ),
                     )
 
-                    doc_tools[doc_id] = [full_doc_function_tool, section_function_tool]
+                    headers_function_tool = FunctionTool.from_defaults(
+                        fn=make_headers_tool(file_path),
+                        name=f"get_headers_{doc_id.replace('-', '_')}",
+                        description=(
+                            f"Get document structure overview for '{doc_title}'. "
+                            f"Shows all section headers to help navigate the document."
+                        ),
+                    )
+
+                    doc_tools[doc_id] = [
+                        full_doc_function_tool,
+                        section_function_tool,
+                        headers_function_tool,
+                    ]
+
+            # Log summary of tool creation
+            total_tools_created = sum(len(tools) for tools in doc_tools.values())
+            logger.info(
+                f"Tool creation summary: Created {total_tools_created} tools "
+                "for {len(doc_tools)} documents"
+            )
+            if not doc_tools:
+                logger.error(
+                    "CRITICAL: No tools were created! This will cause all "
+                    "agents to fail."
+                )
+            else:
+                for doc_id, tools in doc_tools.items():
+                    tool_names = [tool.metadata.name for tool in tools]
+                    logger.info(f"  Document {doc_id}: {tool_names}")
 
             # Create rewrite tasks with semaphore for concurrency control
             semaphore = asyncio.Semaphore(self._max_workers)
 
             async def rewrite_with_semaphore(chunk: NodeWithScore) -> NodeWithScore:
                 async with semaphore:
-                    # Get relevant tools for this chunk's document
-                    doc_id = chunk.node.metadata.get("document_id")
-                    relevant_tools = doc_tools.get(doc_id, [])
+                    try:
+                        # Get relevant tools for this chunk's document
+                        doc_id = chunk.node.metadata.get("document_id")
+                        relevant_tools = doc_tools.get(doc_id, [])
 
-                    # Create agent and rewrite
-                    agent = ChunkRewriteAgent(
-                        self._llm, query, nodes, relevant_tools, self._config
-                    )
-                    rewritten_content = await agent.rewrite_chunk(chunk)
+                        # Create agent and rewrite
+                        agent = ChunkRewriteAgent(
+                            self._llm, query, nodes, relevant_tools, self._config
+                        )
+                        rewritten_content = await agent.rewrite_chunk(chunk)
 
-                    # Create new node with rewritten content
-                    new_node = TextNode(
-                        text=rewritten_content,
-                        metadata=chunk.node.metadata,
-                        id_=chunk.node.id_,
-                    )
+                        # Create new node with rewritten content
+                        new_node = TextNode(
+                            text=rewritten_content,
+                            metadata=chunk.node.metadata,
+                            id_=chunk.node.id_,
+                        )
 
-                    return NodeWithScore(node=new_node, score=chunk.score)
+                        return NodeWithScore(node=new_node, score=chunk.score)
+                    except Exception as e:
+                        logger.error(f"Error rewriting chunk {chunk.node.id_}: {e}")
+                        # Create fallback node with original content and error metadata
+                        fallback_node = TextNode(
+                            text=chunk.node.get_content(
+                                metadata_mode=MetadataMode.NONE
+                            ),
+                            metadata={**chunk.node.metadata, "rewrite_error": str(e)},
+                            id_=chunk.node.id_,
+                        )
+                        return NodeWithScore(node=fallback_node, score=chunk.score)
 
             # Execute all rewrite tasks concurrently
             rewritten_nodes = await asyncio.gather(
@@ -476,30 +567,46 @@ class ChunkRewriterPostprocessor(BaseNodePostprocessor):
             return nodes
 
 
-class ExpandedSourceQueryEngine:
+class ExpandedSourceQueryEngine(BaseQueryEngine):
     """Wrapper that ensures postprocessed nodes are returned in source_nodes."""
-    
-    def __init__(self, base_query_engine: BaseQueryEngine, postprocessor: BaseNodePostprocessor):
+
+    def __init__(
+        self, base_query_engine: BaseQueryEngine, postprocessor: BaseNodePostprocessor
+    ):
+        super().__init__(callback_manager=None)
         self.base_query_engine = base_query_engine
         self.postprocessor = postprocessor
-    
+
+    def _query(self, query_bundle: QueryBundle) -> Any:
+        """Query implementation required by BaseQueryEngine."""
+        return self.query(query_bundle.query_str)
+
+    async def _aquery(self, query_bundle: QueryBundle) -> Any:
+        """Async query implementation required by BaseQueryEngine."""
+        return self.query(query_bundle.query_str)
+
+    def _get_prompt_modules(self) -> Any:
+        """Get prompt modules - required by BaseQueryEngine."""
+        return {}
+
     def query(self, query_str: str) -> Any:
         # Get the normal response
         response = self.base_query_engine.query(query_str)
-        
+
         # If we have source nodes, reprocess them to get expanded versions
-        if hasattr(response, 'source_nodes') and response.source_nodes:
+        if hasattr(response, "source_nodes") and response.source_nodes:
             from llama_index.core.schema import QueryBundle
+
             query_bundle = QueryBundle(query_str=query_str)
-            
+
             # Apply postprocessing to get expanded nodes
             expanded_nodes = self.postprocessor.postprocess_nodes(
                 response.source_nodes, query_bundle
             )
-            
+
             # Replace the source nodes with expanded ones
             response.source_nodes = expanded_nodes
-        
+
         return response
 
 
@@ -508,7 +615,7 @@ def create_agentic_query_engine(
     vector_store: Any,  # VectorStore from components/vector_store
     similarity_top_k: int = 10,
     max_workers: int = 3,
-) -> Optional[BaseQueryEngine]:
+) -> Optional[Union[BaseQueryEngine, ExpandedSourceQueryEngine]]:
     """Factory function to create a query engine with configurable post-processing.
 
     Args:
@@ -554,6 +661,103 @@ def create_agentic_query_engine(
             )
             Settings.llm = llm
 
+            # Enable debugging if llamaindex_debugging is set
+            if config.retrieval.llamaindex_debugging:
+                from llama_index.core.callbacks import (
+                    CallbackManager,
+                    LlamaDebugHandler,
+                )
+                from llama_index.core.callbacks.base import BaseCallbackHandler
+                from llama_index.core.callbacks.schema import CBEventType
+
+                class ReActVerboseHandler(BaseCallbackHandler):
+                    """Custom handler to show ReAct agent reasoning steps."""
+
+                    def __init__(self) -> None:
+                        super().__init__([], [])
+
+                    def _should_log(self, event_type: CBEventType) -> bool:
+                        return True
+
+                    def start_trace(self, trace_id: Optional[str] = None) -> None:
+                        """Start a trace - no-op implementation."""
+                        pass
+
+                    def end_trace(
+                        self,
+                        trace_id: Optional[str] = None,
+                        trace_map: Optional[dict] = None,
+                    ) -> None:
+                        """End a trace - no-op implementation."""
+                        pass
+
+                    def on_event_start(
+                        self,
+                        event_type: CBEventType,
+                        payload: Optional[Dict[str, Any]] = None,
+                        event_id: str = "",
+                        parent_id: str = "",
+                        **kwargs: Any,
+                    ) -> str:
+                        if event_type == CBEventType.LLM:
+                            # Debug: print payload structure to understand format
+                            print(f"\n🔍 LLM Start - Payload: {payload}")
+
+                        if event_type == CBEventType.FUNCTION_CALL:
+                            print(f"\n🔍 Function Call Start - Payload: {payload}")
+
+                        if event_type == CBEventType.AGENT_STEP:
+                            print(f"\n🔍 Agent Step Start - Payload: {payload}")
+                        return event_id or ""
+
+                    def on_event_end(
+                        self,
+                        event_type: CBEventType,
+                        payload: Optional[Dict[str, Any]] = None,
+                        event_id: str = "",
+                        **kwargs: Any,
+                    ) -> None:
+                        if event_type == CBEventType.LLM:
+                            print(f"\n🔍 LLM End - Payload: {payload}")
+                            # Try different possible payload structures
+                            response = ""
+                            if payload:
+                                response = (
+                                    payload.get("response", "")
+                                    or payload.get("output", "")
+                                    or str(payload.get("result", ""))
+                                )
+                            if response:
+                                print(f"\n💬 LLM Output:\n{response}")
+
+                        if event_type == CBEventType.FUNCTION_CALL:
+                            print(f"\n🔍 Function Call End - Payload: {payload}")
+
+                        if event_type == CBEventType.AGENT_STEP:
+                            print(f"\n🔍 Agent Step End - Payload: {payload}")
+
+                # Create handlers for comprehensive debugging
+                verbose_handler = ReActVerboseHandler()
+                llama_debug = LlamaDebugHandler(print_trace_on_end=True)
+                callback_manager = CallbackManager([verbose_handler, llama_debug])
+                Settings.callback_manager = callback_manager
+
+                # Note: Settings.debug is not available in current LlamaIndex version
+                # General debug mode is enabled via callback managers instead
+
+                # Set LlamaIndex-specific loggers to DEBUG level
+                logging.getLogger("llama_index").setLevel(logging.DEBUG)
+                logging.getLogger("llama_index.core").setLevel(logging.DEBUG)
+                logging.getLogger("llama_index.core.agent").setLevel(logging.DEBUG)
+                logging.getLogger("llama_index.core.query_engine").setLevel(
+                    logging.DEBUG
+                )
+
+                logger.info(
+                    "LlamaIndex debugging is enabled - you'll see detailed "
+                    "turn-by-turn ReAct agent output"
+                )
+
             # Create agentic postprocessor
             postprocessor = ChunkRewriterPostprocessor(
                 llm=llm, index=index, config=config, max_workers=max_workers
@@ -563,12 +767,13 @@ def create_agentic_query_engine(
         elif config.retrieval.mode == "static":
             # Create static postprocessor (no LLM required)
             postprocessor = StaticContextPostprocessor()
-            
+
             # Set a dummy LLM to prevent LlamaIndex from trying to initialize OpenAI
             # This is needed because index.as_query_engine() requires an LLM in Settings
             from llama_index.core.llms import MockLLM
+
             Settings.llm = MockLLM()
-            
+
             logger.info("Using static postprocessor with section expansion")
 
         else:
@@ -583,9 +788,12 @@ def create_agentic_query_engine(
         )
 
         # For static mode, wrap to ensure expanded nodes are returned in source_nodes
+        query_engine: Union[BaseQueryEngine, ExpandedSourceQueryEngine]
         if config.retrieval.mode == "static":
             query_engine = ExpandedSourceQueryEngine(base_query_engine, postprocessor)
-            logger.info("Wrapped with ExpandedSourceQueryEngine to return expanded sections")
+            logger.info(
+                "Wrapped with ExpandedSourceQueryEngine to return expanded sections"
+            )
         else:
             query_engine = base_query_engine
 

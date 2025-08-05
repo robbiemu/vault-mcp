@@ -17,7 +17,9 @@ from vault_mcp.config import (
 
 # Import the global variables from the main module
 from .. import main as server_main
-from ..main import app
+from ..main import (
+    app,
+)
 
 
 @pytest.fixture(scope="function", autouse=True)

@@ -59,6 +59,9 @@ class ServerConfig(BaseModel):
 
     host: str = Field(default="127.0.0.1", description="Server host")
     port: int = Field(default=8000, description="Server port")
+    default_query_limit: int = Field(
+        default=5, description="Default number of results returned for queries"
+    )
 
 
 class EmbeddingModelConfig(BaseModel):
@@ -80,6 +83,9 @@ class EmbeddingModelConfig(BaseModel):
     api_key: Optional[str] = Field(
         default=None, description="API key for openai_endpoint provider"
     )
+    wrapper_class: Optional[str] = Field(
+        default=None, description="Custom wrapper class for pluggable embeddings"
+    )
 
 
 class GenerationModelConfig(BaseModel):
@@ -99,6 +105,13 @@ class RetrievalConfig(BaseModel):
 
     mode: str = Field(
         default="agentic", description="Post-processing mode: 'agentic' or 'static'"
+    )
+    llamaindex_debugging: bool = Field(
+        default=False,
+        description="Enable verbose turn-by-turn LlamaIndex debugging output",
+    )
+    max_iterations: int = Field(
+        default=20, description="Maximum number of iterations for ReAct agents"
     )
 
 
@@ -206,18 +219,3 @@ def load_config(
     config.prompts = prompts_data
 
     return config
-
-
-def _deep_merge_config(
-    base: Dict[str, Any], override: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Deep merge configuration dictionaries."""
-    result = base.copy()
-
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge_config(result[key], value)
-        else:
-            result[key] = value
-
-    return result

@@ -8,11 +8,29 @@ The Document Processing component handles all aspects of document ingestion, con
 
 ### Document Loading
 
-- **`create_reader(config: Config) -> BaseReader`** - Factory function to create appropriate document readers
-- **`load_documents(config: Config) -> List[Document]`** - Load and filter documents using configured reader
-- **`DocumentLoaderError`** - Exception raised for document loading failures
+- **`create_reader(config: Config) -> BaseReader`** - Factory function to create appropriate document readers based on the configured `paths.type` (Standard, Obsidian, Joplin).
+- **`load_documents(config: Config) -> List[Document]`** - Orchestrates the document loading process, incorporating the "Filter-Then-Load" strategy.
+- **`DocumentLoaderError`** - Exception raised for document loading failures.
+
+#### "Filter-Then-Load" Strategy
+
+To optimize performance and resource usage, the `load_documents` function implements a "Filter-Then-Load" strategy. Instead of loading all files from the `vault_dir` and then filtering them in memory, this approach first identifies the file paths that match the `prefix_filter.allowed_prefixes` (if configured). Only the file paths that pass this initial filter are then passed to the respective `BaseReader` (e.g., `ObsidianReader`, `SimpleDirectoryReader`) for actual content loading. This significantly reduces the I/O and processing overhead, especially in large vaults with many irrelevant files.
+
+### Node Parsing
+
+After documents are loaded, they undergo a two-stage parsing process to convert raw document content into structured chunks (nodes) suitable for embedding and retrieval. This process ensures that both the structural integrity and the optimal size of the chunks are maintained.
+
+- **`MarkdownNodeParser`**: This parser is used first to process the raw Markdown content. It understands and preserves the document's inherent structure, such as headings, lists, code blocks, and other Markdown elements. This is crucial for maintaining the semantic meaning and the context of the information.
+
+- **`SentenceSplitter`**: Following the `MarkdownNodeParser`, the output is further processed by a `SentenceSplitter`. This splitter divides the structurally parsed sections into smaller, appropriately sized chunks. It ensures that chunks are within the configured `chunk_size` and `chunk_overlap` limits, making them suitable for embedding while still retaining sufficient context for retrieval.
 
 ### Quality Assessment
+
+- **`ChunkQualityScorer`** - Content-based quality scoring for text chunks
+  - `score(text: str) -> float` - Calculate quality score (0.0-1.0) based on:
+    - Optimal Length (0.4 points): Prefers information-rich but not excessive length
+    - Content Richness (0.3 points): Rewards substantial vocabulary
+    - Information Density (0.3 points): Rewards diversity of meaningful words
 
 - **`ChunkQualityScorer`** - Content-based quality scoring for text chunks
   - `score(text: str) -> float` - Calculate quality score (0.0-1.0) based on:

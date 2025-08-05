@@ -37,6 +37,17 @@ def convert_nodes_to_chunks(
         quality_score = quality_scorer.score(chunk_text)
 
         # Create chunk dictionary compatible with existing vector store
+        # Generate document_id from file_path if not present in metadata
+        document_id = node.metadata.get("document_id")
+        if not document_id:
+            file_path = node.metadata.get("file_path", f"{default_file_path}_{i}")
+            # Create a simple document_id from the file path
+            import hashlib
+
+            document_id = hashlib.md5(
+                file_path.encode(), usedforsecurity=False
+            ).hexdigest()[:8]
+
         chunk = {
             "text": chunk_text,
             "original_text": chunk_text,  # For now, use same content
@@ -45,6 +56,7 @@ def convert_nodes_to_chunks(
             "score": quality_score,  # Use content-based quality score
             "start_char_idx": start_char_idx,
             "end_char_idx": end_char_idx,
+            "document_id": document_id,
         }
         chunks.append(chunk)
 

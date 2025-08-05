@@ -2,7 +2,7 @@
 
 [paths]
 # Update this path to point to your Obsidian vault
-vault_dir = "/Users/Shared/Public/Github/vault-mcp/test_vault"
+vault_dir = "/Users/Shared/Public/Github/vault-mcp/tests/assets/vault"
 # Directory to store the ChromaDB vector database.
 # It is strongly recommended to use an absolute path.
 database_dir = "./chroma_db"
@@ -37,13 +37,17 @@ debounce_seconds = 2
 [server]
 host = "127.0.0.1"
 port = 8000
+default_query_limit = 5
 
 # ===== MODEL CONFIGURATION =====
 
 [embedding_model]
 # Choose embedding provider: "sentence_transformers", "mlx_embeddings", "openai_endpoint"
-provider = "sentence_transformers"
-model_name = "all-MiniLM-L6-v2"
+provider = "openai_endpoint"
+model_name = "yoeven/multilingual-e5:large-it-Q5_K_M"
+endpoint_url = "http://localhost:11434/v1"
+api_key = "ollama"
+wrapper_class = "plugins.e5_instruct_wrapper.E5InstructWrapper"
 
 # For MLX on Apple Silicon (experimental):
 # provider = "mlx_embeddings"

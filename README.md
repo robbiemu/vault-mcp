@@ -36,7 +36,7 @@ A **Model Context Protocol (MCP)** compliant server that indexes, searches, and 
 ```mermaid
 graph TB
     subgraph "User Environment"
-        OV["📁 Obsidian Vault<br/>(.md files)"]
+        DS["📁 Document Sources<br/>(Obsidian, Joplin, Markdown)"]
         AI["🤖 AI Agent<br/>(MCP Client)"]
     end
     
@@ -45,12 +45,13 @@ graph TB
             MS["🖥️ MCP Server<br/>(FastAPI)"]
             VS["🔍 Vector Store<br/>(ChromaDB)"]
             FW["👁️ File Watcher<br/>(Live Sync)"]
-            AR["🤖 Agentic Retriever<br/>(LlamaIndex)"]
+            AR["🤖 Retrieval & Post-processing<br/>(Agentic/Static)"]
         end
         
         subgraph "Shared Utilities"
-            DL["📄 Document Loader<br/>(Multi-source)"]
+            DL["📄 Document Loader<br/>(Filter-Then-Load)"]
             QS["📊 Quality Scorer<br/>(Content-based)"]
+            ES["🧠 Embedding System<br/>(Factory)"]
             CF["⚙️ Configuration"]
         end
     end
@@ -60,21 +61,23 @@ graph TB
     end
     
     %% Data flow connections
-    OV -->|"Monitor .md files"| FW
+    DS -->|"Monitor files"| FW
     FW -->|"Load & parse documents"| DL
     DL -->|"Quality score chunks"| QS
-    QS -->|"Store chunks"| VS
+    QS -->|"Embed chunks"| ES
+    ES -->|"Store embeddings"| VS
     AI <-->|"HTTP/REST API (MCP Protocol)"| MS
     MS -->|"Search queries"| VS
-    MS -->|"RAG queries"| AR
-    MS -->|"Document retrieval"| OV
-    AR <-->|"Generate answers"| LLM
+    MS -->|"Retrieve & Post-process"| AR
+    AR -- "Agentic Mode" -->|"Generate answers"| LLM
+    MS -->|"Document retrieval"| DS
     
     %% Configuration connections
     CF -.->|"Configure"| MS
     CF -.->|"Configure"| FW
     CF -.->|"Configure"| VS
     CF -.->|"Configure"| AR
+    CF -.->|"Configure"| ES
     
     %% Styling
     classDef component fill:#e1f5fe,stroke:#01579b,stroke-width:2px
@@ -82,8 +85,8 @@ graph TB
     classDef utility fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
     
     class MS,VS,FW,AR component
-    class OV,AI,LLM external
-    class DL,QS,CF utility
+    class DS,AI,LLM external
+    class DL,QS,ES,CF utility
 ```
 
 ## 🚀 Quick Start
@@ -372,7 +375,7 @@ model_name = "gpt-4o-mini"
 
 #### Embedding Models
 
-The server supports three embedding providers:
+The server supports various embedding providers, configurable via the `[embedding_model]` section. This pluggable system allows you to easily switch between different models and services.
 
 **1. Sentence Transformers (Default)**
 ```toml
@@ -395,6 +398,17 @@ provider = "openai_endpoint"
 model_name = "nomic-embed-text"
 endpoint_url = "http://localhost:11434/v1"  # Ollama example
 api_key = "ollama"  # Required, even if unused
+```
+
+**4. Custom Plugin (e.g., E5InstructWrapper)**
+For more advanced or custom embedding models, you can specify a `wrapper_class` that points to a Python class implementing the `BaseEmbedding` interface. This is how plugins like `E5InstructWrapper` are integrated.
+
+```toml
+[embedding_model]
+provider = "plugin"
+wrapper_class = "plugins.e5_instruct_wrapper.E5InstructWrapper"
+# Additional parameters specific to your custom wrapper can be added here
+# e.g., model_name = "intfloat/multilingual-e5-large-instruct"
 ```
 
 #### Generation Models
@@ -515,29 +529,47 @@ vault-mcp/
 
 ## 🧠 How It Works
 
-The server uses a modern two-stage ingestion pipeline built on LlamaIndex:
+The server employs a sophisticated, multi-stage pipeline for document ingestion, processing, and retrieval, leveraging LlamaIndex for robust indexing and query capabilities.
 
-1. **Document Loading**: The multi-source document loader reads from your configured source:
-   - **Standard**: Scans Markdown files in a directory using `SimpleDirectoryReader`
-   - **Obsidian**: Processes vault files with wiki-link resolution using `ObsidianReader`
-   - **Joplin**: Fetches notes via API using `JoplinReader`
+### 1. Document Ingestion & Processing
 
-2. **Node Parsing**: Documents are processed through LlamaIndex's `MarkdownNodeParser` to:
-   - Preserve document structure and metadata
-   - Generate properly sized chunks with overlap
-   - Maintain character position tracking for section expansion
+1.  **File Watching & Filter-Then-Load**:
+    *   A file watcher continuously monitors your configured document source (Obsidian, Joplin, or standard Markdown directories) for changes.
+    *   When changes are detected, the system applies a **"Filter-Then-Load"** strategy: it first filters file paths based on configured prefixes (if any) and then efficiently loads only the relevant documents. This optimizes performance by avoiding unnecessary processing.
 
-3. **Quality Scoring**: Chunks are scored using content-based heuristics to filter valuable content.
+2.  **Multi-Source Document Loading**:
+    *   The document loader intelligently reads from various sources:
+        *   **Standard**: Scans plain Markdown files in a directory using `SimpleDirectoryReader`.
+        *   **Obsidian**: Processes vault files with wiki-link resolution and metadata extraction using `ObsidianReader`.
+        *   **Joplin**: Fetches notes via API using `JoplinReader`.
 
-4. **Embedding and Storage**: High-quality chunks are embedded using sentence transformers and stored in ChromaDB.
+3.  **Two-Stage Node Parsing**:
+    *   Loaded documents undergo a two-stage parsing process to create optimized chunks (nodes):
+        *   **Structural Parsing**: `MarkdownNodeParser` first processes the document to preserve its inherent structure (headings, lists, code blocks). This ensures that semantic meaning is maintained across chunk boundaries.
+        *   **Size-Based Splitting**: Subsequently, a `SentenceSplitter` further divides these structurally parsed sections into appropriately sized chunks with configurable overlap. This ensures chunks are small enough for embedding while retaining sufficient context.
 
-5. **Configurable Retrieval**: Based on your `retrieval.mode` setting:
-   - **Agentic Mode**: Uses `ChunkRewriteAgent` for AI-enhanced content refinement
-   - **Static Mode**: Expands chunks to full section context using `DocumentReader`
+4.  **Quality Scoring**:
+    *   Each generated chunk is evaluated using content-based heuristics by the `Quality Scorer`. Chunks that do not meet a predefined quality threshold are filtered out, ensuring only valuable content is indexed.
 
-6. **Live Sync**: A file watcher monitors your document source for changes, automatically re-indexing when files are modified.
+5.  **Pluggable Embedding & Storage**:
+    *   High-quality chunks are then transformed into numerical vector embeddings using the **pluggable embedding system**. This system supports various providers (Sentence Transformers, MLX Embeddings, OpenAI-compatible APIs like Ollama) via a factory pattern, allowing for flexible and extensible embedding model integration.
+    *   These embeddings, along with their corresponding text and metadata, are stored in ChromaDB, the persistent vector store.
 
-7. **Query Processing**: Queries are processed through the selected retrieval pipeline to deliver contextually relevant answers.
+### 2. Configurable Retrieval & Query Processing
+
+1.  **Query Reception**:
+    *   Incoming search queries are received by the MCP Server.
+
+2.  **Vector Store Retrieval**:
+    *   The query is embedded using the same embedding system used for indexing, and a similarity search is performed against the vector store to retrieve the most relevant document chunks.
+
+3.  **Configurable Post-Processing**:
+    *   Based on the `retrieval.mode` setting in your configuration, the retrieved chunks undergo different post-processing:
+        *   **`agentic` Mode**: Uses an AI-enhanced `ChunkRewriterPostprocessor` (or similar agentic logic) to rewrite and refine the retrieved chunks, often involving an LLM call to generate more comprehensive and contextually rich answers. This mode prioritizes quality and depth, suitable for complex queries.
+        *   **`static` Mode**: Employs a `StaticContextPostprocessor` to expand the retrieved chunks to their full section context (e.g., including the entire paragraph or heading section). This mode is faster and deterministic, providing direct, un-rewritten context.
+
+4.  **Response Generation**:
+    *   The post-processed chunks are then used to formulate the final response, which may involve further interaction with LLM Providers in `agentic` mode for Retrieval-Augmented Generation (RAG).
 
 ## 🎯 Use Cases
 

@@ -2,8 +2,7 @@
 .DS_Store
 .AppleDouble
 .LSOverride
-Icon[
-]
+Icon?
 
 # Thumbnails
 ._*
@@ -237,7 +236,7 @@ chroma.sqlite3
 
 # .aiderCode.md
 # GEMINI.MD
-.warp.md
+[Ww]arp.md
 
 project_bundle.zip
 *.task.md

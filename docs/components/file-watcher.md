@@ -29,7 +29,7 @@ The File Watcher component monitors the Obsidian vault for file system changes a
 
 ### Internal Dependencies
 - **Vector Store component** - Updates document chunks in response to changes
-- **Document Processor module** - Processes changed files into chunks
+- **Document Loader module** - Loads and processes changed files into chunks
 - **Config module** - Uses watcher and filtering configuration
 
 ### External Dependencies
@@ -67,11 +67,11 @@ from components.file_watcher.file_watcher import VaultWatcher
 from vault_mcp.config import load_config
 
 config = load_config()
-processor = DocumentProcessor()
+loader = DocumentLoader()
 vector_store = VectorStore()
 
 # Start watching
-watcher = VaultWatcher(config, processor, vector_store)
+watcher = VaultWatcher(config, loader, vector_store)
 watcher.start()
 
 # Check status
@@ -86,7 +86,7 @@ watcher.stop()
 ```python
 # Automatic integration (from MCP server main.py)
 if config.watcher.enabled:
-    file_watcher = VaultWatcher(config, processor, vector_store)
+file_watcher = VaultWatcher(config, loader, vector_store)
     file_watcher.start()
     # Watcher runs in background until server shutdown
 ```

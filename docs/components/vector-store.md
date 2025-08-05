@@ -39,10 +39,19 @@ The Vector Store component manages document embeddings and provides semantic sea
 
 ## Configuration Requirements
 
-Configuration is handled internally with reasonable defaults:
+Configuration is handled internally with reasonable defaults, but the `VectorStore` now requires an `embedding_config` object during initialization:
 
 ```python
+from vault_mcp.config import EmbeddingModelConfig
+
+# Example configuration (this would typically come from app.toml)
+embedding_config = EmbeddingModelConfig(
+    provider="sentence_transformers",
+    model_name="all-MiniLM-L6-v2"
+)
+
 VectorStore(
+    embedding_config=embedding_config,
     persist_directory="./chroma_db",  # Data persistence location
     collection_name="vault_docs"      # ChromaDB collection name
 )
@@ -59,9 +68,14 @@ quality_threshold = 0.75  # Minimum score for search results
 ### Basic Operations
 ```python
 from components.vector_store.vector_store import VectorStore
+from vault_mcp.config import EmbeddingModelConfig
 
-# Initialize vector store
-vector_store = VectorStore()
+# Initialize vector store with an embedding configuration
+embedding_config = EmbeddingModelConfig(
+    provider="sentence_transformers",
+    model_name="all-MiniLM-L6-v2"
+)
+vector_store = VectorStore(embedding_config=embedding_config)
 
 # Add document chunks
 chunks = [{

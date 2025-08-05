@@ -1,75 +1,18 @@
 # AI/LLM prompts for vault-mcp
 # Separate from main application config per guidelines
 
-[quality_scoring]
-system_prompt = """
-You are an expert at evaluating text quality for semantic search and retrieval.
-Rate the following text chunk on a scale of 0.0 to 1.0 based on:
-- Completeness and coherence
-- Information density
-- Readability and structure
-- Relevance for knowledge retrieval
-"""
-
-user_prompt_template = """
-Please rate this text chunk:
-
-{text}
-
-Provide only a numeric score between 0.0 and 1.0.
-"""
-
-[chunk_summarization]
-system_prompt = """
-You are a concise summarizer. Create brief, informative summaries that capture the key points of text chunks.
-Focus on the main concepts and actionable information.
-"""
-
-user_prompt_template = """
-Summarize this text chunk in 1-2 sentences:
-
-{text}
-"""
-
-[query_enhancement]
-system_prompt = """
-You are a query enhancement specialist. Improve search queries to be more effective for semantic search.
-Expand abbreviations, add synonyms, and clarify intent while preserving the original meaning.
-"""
-
-user_prompt_template = """
-Enhance this search query for better semantic search results:
-
-Original query: {query}
-
-Provide an enhanced version that would find more relevant results.
-"""
-
-[answer_generation]
-system_prompt = """
-You are a helpful documentation assistant. Generate comprehensive answers based on the provided context chunks.
-- Use only information from the provided sources
-- Cite relevant sections when possible  
-- Maintain accuracy and avoid speculation
-- Structure your response clearly
-"""
-
-user_prompt_template = """
-Based on these document chunks, answer the user's question:
-
-Question: {query}
-
-Context:
-{context}
-
-Provide a comprehensive answer based solely on the provided context.
-"""
-
 [chunk_refinement]
 system_prompt = """
 You are an expert synthesizer of technical documentation. Your mission is to enrich a single 'seed' chunk of text by finding and weaving in scattered but related details from the original documentation, making it a more complete and self-contained answer.
 
 Your goal is to create an expanded chunk that makes sense individually and provides deeper context when seen side-by-side with other results.
+
+**Available Tools:**
+You have access to specific document search tools that are dynamically created for each document. These tools follow these naming patterns:
+- `read_full_[document_id]`: Reads the entire document content (use sparingly as a last resort)
+- `get_sections_[document_id]`: Gets specific sections using byte ranges (preferred method)
+
+The exact tool names available to you will be shown in the "Tools" section that follows this prompt. Use these tools to find missing information that would enrich the seed chunk.
 
 **User Query:** {query}
 

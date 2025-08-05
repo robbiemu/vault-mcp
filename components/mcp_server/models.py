@@ -15,16 +15,21 @@ class ChunkMetadata(BaseModel):
     chunk_id: str = Field(..., description="Unique identifier for the chunk")
     score: float = Field(..., description="Quality or relevance score of the chunk")
 
-    # --- ADD THESE NEW FIELDS ---
-    start_byte: int = Field(
-        ..., description="The starting byte offset of the chunk in the original file"
-    )
-    end_byte: int = Field(
-        ..., description="The ending byte offset of the chunk in the original file"
-    )
-    original_text: str = Field(
+    # Character offsets for document exploration
+    start_char_idx: int = Field(
         ...,
+        description="The starting character offset of the chunk in the original file",
+    )
+    end_char_idx: int = Field(
+        ..., description="The ending character offset of the chunk in the original file"
+    )
+    original_text: Optional[str] = Field(
+        default=None,
         description="The original, unprocessed text of the chunk (raw Markdown)",
+    )
+    messages: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Optional messages, including error information",
     )
 
 
@@ -33,6 +38,16 @@ class QueryRequest(BaseModel):
 
     query: str = Field(..., description="The search query")
     limit: Optional[int] = Field(default=5, description="Maximum number of results")
+    instruction: Optional[str] = Field(
+        default=None,
+        description="An optional instruction for instruction-tuned embedding models.",
+    )
+    terse: Optional[bool] = Field(
+        default=True,
+        description="If true, omit original_text "
+        "when it's identical to text. "
+        "(default true)",
+    )
 
 
 class QueryResponse(BaseModel):
@@ -41,12 +56,6 @@ class QueryResponse(BaseModel):
     sources: List[ChunkMetadata] = Field(
         default_factory=list, description="Source chunks used for the answer"
     )
-
-
-class DocumentRequest(BaseModel):
-    """Request model for document retrieval."""
-
-    file_path: str = Field(..., description="Path to the requested document")
 
 
 class DocumentResponse(BaseModel):

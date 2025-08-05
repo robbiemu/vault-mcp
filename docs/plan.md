@@ -187,9 +187,9 @@ Each chunk stores:
 | Framework       | FastAPI                         |
 | File watcher    | `watchdog`                      |
 | Markdown parser | `mistune` or `markdown-it-py`   |
-| Embeddings      | Instructor / bge-small / Ollama |
-| Vector store    | Chroma (or FAISS for RAM-only)  |
-| LLM interface   | LlamaIndex or LangChain         |
+| Embeddings      | Pluggable Embedding System (Sentence Transformers, MLX, OpenAI-compatible, Custom) |
+| Vector store    | Chroma (or FAISS for RAM-only)                                   |
+| LLM interface   | LlamaIndex (for RAG) / LiteLLM (for LLM access)                  |
 
 ---
 

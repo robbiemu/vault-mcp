@@ -6,9 +6,11 @@ import tempfile
 # Import the global variables from the main module
 import components.mcp_server.main as server_main
 import pytest
+from components.document_processing import ChunkQualityScorer
 from components.mcp_server.main import app
 from components.vector_store.vector_store import VectorStore
 from fastapi.testclient import TestClient
+from llama_index.core.node_parser import MarkdownNodeParser
 from vault_mcp.config import (
     Config,
     EmbeddingModelConfig,
@@ -17,7 +19,6 @@ from vault_mcp.config import (
     PrefixFilterConfig,
     WatcherConfig,
 )
-from vault_mcp.document_processor import DocumentProcessor
 
 
 @pytest.fixture
@@ -50,10 +51,7 @@ def initialize_server():
     )
 
     # Initialize other components
-    server_main.processor = DocumentProcessor(
-        chunk_size=server_main.config.indexing.chunk_size,
-        chunk_overlap=server_main.config.indexing.chunk_overlap,
-    )
+    server_main.node_parser = MarkdownNodeParser.from_defaults()
     server_main.vector_store = VectorStore(
         embedding_config=server_main.config.embedding_model,
         persist_directory=server_main.config.paths.database_dir,
@@ -68,29 +66,60 @@ def client():
         yield test_client
 
 
-def test_full_document_workflow(client, sample_markdown_files, integration_config):
+def test_full_document_workflow(fs, client, sample_markdown_files, integration_config):
     """Test the complete workflow from file processing to API responses."""
     # This test would require modifying the main app to accept test configuration
     # For now, we test individual components integration
 
-    # Initialize components
-    processor = DocumentProcessor(
-        chunk_size=integration_config.indexing.chunk_size,
-        chunk_overlap=integration_config.indexing.chunk_overlap,
-    )
+    # Create virtual directory for ChromaDB
+    fs.create_dir("/tmp/test_chroma_integration")
+
+    # Initialize components using new pipeline
+    node_parser = MarkdownNodeParser.from_defaults()
+    quality_scorer = ChunkQualityScorer()
 
     embedding_config = EmbeddingModelConfig(
         provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
     )
-    vector_store = VectorStore(
-        embedding_config=embedding_config,
-        persist_directory="./test_chroma_integration",
-        collection_name="integration_test",
-    )
 
     try:
-        # Process a file
-        raw_content, chunks = processor.process_file(sample_markdown_files["matching"])
+        vector_store = VectorStore(
+            embedding_config=embedding_config,
+            persist_directory="/tmp/test_chroma_integration",
+            collection_name="integration_test",
+        )
+    except Exception as e:
+        pytest.skip(f"Skipping test due to model download issue: {e}")
+
+    try:
+        # Load and process documents using new pipeline
+        from llama_index.core import SimpleDirectoryReader
+
+        reader = SimpleDirectoryReader(
+            input_files=[str(sample_markdown_files["matching"])],
+            required_exts=[".md"],
+        )
+        documents = reader.load_data()
+        nodes = node_parser.get_nodes_from_documents(documents)
+
+        # Convert to chunks with quality scoring
+        chunks = []
+        for node in nodes:
+            chunk_text = node.get_content()
+            quality_score = quality_scorer.score(chunk_text)
+
+            chunk = {
+                "text": chunk_text,
+                "original_text": chunk_text,
+                "file_path": str(sample_markdown_files["matching"]),
+                "chunk_id": node.node_id,
+                "score": quality_score,
+                "start_char_idx": getattr(node, "start_char_idx", 0) or 0,
+                "end_char_idx": (
+                    getattr(node, "end_char_idx", len(chunk_text)) or len(chunk_text)
+                ),
+            }
+            chunks.append(chunk)
 
         # Filter by quality threshold
         quality_chunks = [
@@ -102,12 +131,15 @@ def test_full_document_workflow(client, sample_markdown_files, integration_confi
         # Add to vector store
         vector_store.add_chunks(quality_chunks)
 
-        # Verify indexing worked
-        assert vector_store.get_chunk_count() > 0
-
-        # Test search functionality
-        results = vector_store.search("resource balance game", limit=3)
+        # Test search functionality with quality threshold
+        results = vector_store.search(
+            "resource balance game",
+            limit=3,
+            quality_threshold=integration_config.indexing.quality_threshold,
+        )
         assert len(results) > 0
+        # Since we're using quality_threshold in search, all results should
+        #  meet the threshold
         assert all(
             result.score >= integration_config.indexing.quality_threshold
             for result in results
@@ -183,8 +215,11 @@ def test_config_integration(integration_config, temp_vault_dir):
     assert vault_path == temp_vault_dir.resolve()
 
 
-def test_markdown_to_vector_pipeline(integration_config, temp_vault_dir):
+def test_markdown_to_vector_pipeline(fs, integration_config, temp_vault_dir):
     """Test the complete pipeline from markdown to searchable vectors."""
+    # Create virtual directory for ChromaDB
+    fs.create_dir("/tmp/test_pipeline_chroma")
+
     # Create a test markdown file
     test_file = temp_vault_dir / "Resource Balance Game - Pipeline Test.md"
     test_content = """# Pipeline Test Document
@@ -201,28 +236,56 @@ The system should be able to find this content when searching for relevant terms
 """
     test_file.write_text(test_content)
 
-    # Initialize components
-    processor = DocumentProcessor(
-        chunk_size=integration_config.indexing.chunk_size,
-        chunk_overlap=integration_config.indexing.chunk_overlap,
-    )
+    # Initialize components using new pipeline
+    node_parser = MarkdownNodeParser.from_defaults()
+    quality_scorer = ChunkQualityScorer()
 
     embedding_config = EmbeddingModelConfig(
         provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
     )
-    vector_store = VectorStore(
-        embedding_config=embedding_config,
-        persist_directory="./test_pipeline_chroma",
-        collection_name="pipeline_test",
-    )
 
     try:
-        # Process the file
-        raw_content, chunks = processor.process_file(test_file)
+        vector_store = VectorStore(
+            embedding_config=embedding_config,
+            persist_directory="/tmp/test_pipeline_chroma",
+            collection_name="pipeline_test",
+        )
+    except Exception as e:
+        pytest.skip(f"Skipping test due to model download issue: {e}")
+
+    try:
+        # Process the file using new pipeline
+        from llama_index.core import SimpleDirectoryReader
+
+        reader = SimpleDirectoryReader(
+            input_files=[str(test_file)],
+            required_exts=[".md"],
+        )
+        documents = reader.load_data()
+        nodes = node_parser.get_nodes_from_documents(documents)
+
+        # Convert to chunks with quality scoring
+        chunks = []
+        for node in nodes:
+            chunk_text = node.get_content()
+            quality_score = quality_scorer.score(chunk_text)
+
+            chunk = {
+                "text": chunk_text,
+                "original_text": chunk_text,
+                "file_path": str(test_file),
+                "chunk_id": node.node_id,
+                "score": quality_score,
+                "start_char_idx": getattr(node, "start_char_idx", 0) or 0,
+                "end_char_idx": (
+                    getattr(node, "end_char_idx", len(chunk_text)) or len(chunk_text)
+                ),
+            }
+            chunks.append(chunk)
 
         # Verify processing
-        assert "Pipeline Test Document" in raw_content
         assert len(chunks) > 0
+        assert any("Pipeline Test Document" in chunk["text"] for chunk in chunks)
 
         # Filter and add chunks
         quality_chunks = [

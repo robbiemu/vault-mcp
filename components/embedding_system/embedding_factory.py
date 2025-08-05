@@ -1,10 +1,9 @@
-"""Factory for creating embedding models with different backends."""
-
+import importlib
 import logging
 from typing import Any, List, Protocol, cast
 
 from llama_index.core.embeddings import BaseEmbedding
-
+from pydantic import Field
 from vault_mcp.config import EmbeddingModelConfig
 
 logger = logging.getLogger(__name__)
@@ -141,6 +140,10 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
 
     model_config = {"arbitrary_types_allowed": True}
 
+    # Define the fields that will be set dynamically
+    client: Any = Field(default=None, exclude=True)
+    api_model_name: str = Field(default="", exclude=True)
+
     def __init__(self, model_name: str, endpoint_url: str, api_key: str, **kwargs: Any):
         """Initialize OpenAI-compatible embedding client.
 
@@ -150,13 +153,11 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
             api_key: API key for authentication
             **kwargs: Additional arguments for BaseEmbedding
         """
-        super().__init__(model_name=model_name, **kwargs)
         try:
             from openai import OpenAI
 
             client = OpenAI(api_key=api_key, base_url=endpoint_url)
-            object.__setattr__(self, "client", client)
-            object.__setattr__(self, "_model_name", model_name)
+            model_name_attr = model_name
             logger.info(
                 f"Initialized OpenAI-compatible client for {model_name} "
                 f"at {endpoint_url}"
@@ -166,11 +167,15 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
                 "openai is required for this provider. Install with: pip install openai"
             ) from e
 
+        super().__init__(model_name=model_name, **kwargs)
+        object.__setattr__(self, "client", client)
+        object.__setattr__(self, "api_model_name", model_name_attr)
+
     def encode(self, texts: List[str]) -> List[List[float]]:
         """Encode texts into embeddings using OpenAI-compatible API."""
         try:
             response = self.client.embeddings.create(
-                model=self._model_name, input=texts
+                model=self.api_model_name, input=texts
             )
             return [embedding.embedding for embedding in response.data]
         except Exception as e:
@@ -182,7 +187,7 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
         """Get query embedding."""
         try:
             response = self.client.embeddings.create(
-                model=self._model_name, input=[query]
+                model=self.api_model_name, input=[query]
             )
             return cast(List[float], response.data[0].embedding)
         except Exception as e:
@@ -193,7 +198,7 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
         """Get text embedding."""
         try:
             response = self.client.embeddings.create(
-                model=self._model_name, input=[text]
+                model=self.api_model_name, input=[text]
             )
             return cast(List[float], response.data[0].embedding)
         except Exception as e:
@@ -206,18 +211,20 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
 
 
 def create_embedding_model(config: EmbeddingModelConfig) -> BaseEmbedding:
-    """Factory function to create embedding models based on configuration.
+    """Factory function to create embedding models based on configuration."""
+    if hasattr(config, "wrapper_class") and config.wrapper_class:
+        try:
+            module_path, class_name = config.wrapper_class.rsplit(".", 1)
+            module = importlib.import_module(module_path)
+            wrapper_class = getattr(module, class_name)
+            return cast(BaseEmbedding, wrapper_class(config))
+        except (ImportError, AttributeError) as e:
+            logger.error(f"Failed to load wrapper class '{config.wrapper_class}': {e}")
+            raise ValueError(
+                f"Could not load wrapper class '{config.wrapper_class}'"
+            ) from e
 
-    Args:
-        config: Embedding model configuration
-
-    Returns:
-        Embedding model instance
-
-    Raises:
-        ValueError: If provider is not supported
-        ImportError: If required dependencies are not installed
-    """
+    # Fallback to original provider logic
     provider = config.provider.lower()
 
     if provider == "sentence_transformers":

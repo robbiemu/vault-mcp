@@ -26,7 +26,7 @@ A **Model Context Protocol (MCP)** compliant server that indexes, searches, and 
 - [🔧 Development](#-development)
 - [🧠 How It Works](#-how-it-works)
 - [🎯 Use Cases](#-use-cases)
-- [🔍 Quality Scoring](#-quality-scoring)
+- [🧠 Quality vs. Relevance: How Scoring Works](#-quality-vs-relevance-how-scoring-works)
 - [🚨 Troubleshooting](#-troubleshooting)
 - [📊 Performance](#-performance)
 - [🤝 Contributing](#-contributing)
@@ -374,8 +374,7 @@ model_name = "gpt-4o-mini"
 
 The server supports various embedding providers, configurable via the `[embedding_model]` section. This pluggable system allows you to easily switch between different models and services.
 
-**1. Sentence Transformers (Default)**
-```toml
+**1. Sentence Transformers (Default)**```toml
 [embedding_model]
 provider = "sentence_transformers"
 model_name = "all-MiniLM-L6-v2"  # or any Hugging Face model
@@ -397,15 +396,22 @@ endpoint_url = "http://localhost:11434/v1"  # Ollama example
 api_key = "ollama"  # Required, even if unused
 ```
 
-**4. Custom Plugin (e.g., E5InstructWrapper)**
-For more advanced or custom embedding models, you can specify a `wrapper_class` that points to a Python class implementing the `BaseEmbedding` interface. This is how plugins like `E5InstructWrapper` are integrated.
+**4. Custom Plugin Wrappers**
+For advanced or custom embedding models, you can specify a `wrapper_class`. The system will dynamically load this class, giving you full control over the embedding logic. This is ideal for models that require special formatting, like instruction-tuned models.
 
+The `wrapper_class` can be used to extend the behavior of a built-in provider. For example, you can use the `openai_endpoint` provider but add a custom wrapper to pre-process the queries.
+
+**Example (E5-Instruct model running on Ollama):**
 ```toml
 [embedding_model]
-provider = "plugin"
+# The provider is set to the underlying type we want to use.
+provider = "openai_endpoint" 
+model_name = "yoeven/multilingual-e5:large-it-Q5_K_M"
+endpoint_url = "http://localhost:11434/v1"
+api_key = "ollama"
+
+# The wrapper_class overrides the default behavior of the provider.
 wrapper_class = "plugins.e5_instruct_wrapper.E5InstructWrapper"
-# Additional parameters specific to your custom wrapper can be added here
-# e.g., model_name = "intfloat/multilingual-e5-large-instruct"
 ```
 
 #### Generation Models
@@ -575,15 +581,35 @@ The server employs a sophisticated, multi-stage pipeline for document ingestion,
 - **Research Assistant**: Quick retrieval of relevant information from large document collections
 - **Documentation Sync**: Keep your AI tools synchronized with your latest documentation
 
-## 🔍 Quality Scoring
+## 🧠 Quality vs. Relevance: How Scoring Works
 
-The server uses several heuristics to score chunk quality:
+The server uses a universal **two-score system** for all queries, regardless of whether the retrieval mode is `agentic` or `static`. Understanding this distinction is key to interpreting search results.
 
-- **Length Score**: Prefers medium-length chunks (100-800 characters)
-- **Completeness**: Rewards chunks with complete sentences
-- **Structure**: Favors chunks with headings, lists, or other structural elements
-- **Content Richness**: Avoids chunks with excessive punctuation or very short words
-- **Coherence**: Rewards good word diversity and topic focus
+### Score #1: The Quality Filter (Heuristic-Based)
+
+This score measures the intrinsic quality of a document chunk, independent of any specific query.
+
+-   **When**: Calculated **once** during the initial indexing of a document.
+-   **How**: The `Quality Scorer` analyzes the text of each chunk based on a set of content-based heuristics:
+    -   **Optimal Length (40% weight)**: Prefers information-dense chunks that are not excessively long or short (ideally 150-1024 characters).
+    -   **Content Richness (30% weight)**: Rewards chunks with more substantial vocabulary (i.e., longer average word length).
+    -   **Information Density (30% weight)**: Rewards a high ratio of unique, meaningful words, indicating that the chunk is concise and not repetitive.
+-   **Purpose**: This score is used as a **filter**. During a search, any chunk with a quality score below the `indexing.quality_threshold` set in your configuration will be discarded. This prevents low-quality or "noisy" chunks from ever appearing in your results.
+
+### Score #2: The Relevance Rank (Embedding-Based)
+
+This score measures how relevant a chunk is to your specific, real-time query.
+
+-   **When**: Calculated **dynamically** every time you make a `/mcp/query` request.
+-   **How**: It is derived from the semantic similarity between your query's vector embedding and each chunk's embedding in the database.
+-   **Purpose**: This score is used for **ranking**. After the low-quality chunks have been filtered out, the remaining results are sorted by this relevance score to ensure the most relevant results appear first.
+
+### TL;DR: The Final Result
+
+When you receive a response from the `/mcp/query` endpoint:
+
+-   The **order** of the sources is determined by the **Relevance Rank**.
+-   The `score` field you see inside each source object is its original **Quality Filter Score**.
 
 ## 🚨 Troubleshooting
 
@@ -619,13 +645,17 @@ export LOG_LEVEL=DEBUG
 uvicorn vault_mcp.main:app --reload
 ```
 
-## 📊 Performance
+## 📊 Performance Goals
 
-- **Dataset Size**: Optimized for <24 files, ~50k tokens
-- **Memory Usage**: Embeddings and vector store fit comfortably in RAM
-- **Startup Time**: ~1-2 seconds for cold start
-- **Search Latency**: Sub-second semantic search responses
-- **File Watching**: Low CPU usage due to debouncing
+- **Scalability**: Thanks to the "Filter-Then-Load" architecture, the server is not limited by the total size of your vault. Performance depends on the number of files that match your `allowed_prefixes` filter, allowing it to handle large vaults efficiently.
+- **Memory Usage**: Embeddings and the vector store for a moderately sized, filtered document set fit comfortably in RAM.
+- **Startup Time**: ~2-10 seconds for a cold start (recommened) on a typical filtered dataset.
+- **Search Latency**: Sub-second semantic search responses.
+- **File Watching**: Low CPU usage due to event debouncing.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## 🤝 Contributing
 
@@ -635,10 +665,6 @@ uvicorn vault_mcp.main:app --reload
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
 ## 🙏 Acknowledgments
 
 - [FastAPI](https://fastapi.tiangolo.com/) for the excellent web framework
@@ -646,7 +672,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - [Sentence Transformers](https://www.sbert.net/) for embedding generation
 - [Watchdog](https://github.com/gorakhargosh/watchdog) for file system monitoring
 - [Mistune](https://mistune.lepture.com/) for markdown parsing
-
----
-
-**Happy documenting! 📚✨**

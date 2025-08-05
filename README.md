@@ -35,20 +35,19 @@ A **Model Context Protocol (MCP)** compliant server that indexes, searches, and 
 
 ```mermaid
 graph TB
-    subgraph "User Environment"
+    subgraph UE ["User Environment"]
         DS["📁 Document Sources<br/>(Obsidian, Joplin, Markdown)"]
         AI["🤖 AI Agent<br/>(MCP Client)"]
     end
     
-    subgraph "Vault MCP Server"
-        subgraph "Components"
+    subgraph VMS ["Vault MCP Server"]
+        subgraph COMP ["Components"]
             MS["🖥️ MCP Server<br/>(FastAPI)"]
             VS["🔍 Vector Store<br/>(ChromaDB)"]
             FW["👁️ File Watcher<br/>(Live Sync)"]
             AR["🤖 Retrieval & Post-processing<br/>(Agentic/Static)"]
         end
-        
-        subgraph "Shared Utilities"
+        subgraph UTIL ["Shared Utilities"]
             DL["📄 Document Loader<br/>(Filter-Then-Load)"]
             QS["📊 Quality Scorer<br/>(Content-based)"]
             ES["🧠 Embedding System<br/>(Factory)"]
@@ -56,34 +55,32 @@ graph TB
         end
     end
     
-    subgraph "External Services"
+    subgraph EXT ["External Services"]
         LLM["🚀 LLM Providers<br/>(OpenAI/Anthropic/Ollama)"]
     end
-    
-    %% Data flow connections
-    DS -->|"Monitor files"| FW
-    FW -->|"Load & parse documents"| DL
-    DL -->|"Quality score chunks"| QS
-    QS -->|"Embed chunks"| ES
-    ES -->|"Store embeddings"| VS
-    AI <-->|"HTTP/REST API (MCP Protocol)"| MS
-    MS -->|"Search queries"| VS
-    MS -->|"Retrieve & Post-process"| AR
-    AR -- "Agentic Mode" -->|"Generate answers"| LLM
-    MS -->|"Document retrieval"| DS
-    
-    %% Configuration connections
-    CF -.->|"Configure"| MS
-    CF -.->|"Configure"| FW
-    CF -.->|"Configure"| VS
-    CF -.->|"Configure"| AR
-    CF -.->|"Configure"| ES
-    
-    %% Styling
+
+    DS -->|Monitor files| FW
+    FW -->|Load & parse documents| DL
+    DL -->|Quality score chunks| QS
+    QS -->|Embed chunks| ES
+    ES -->|Store embeddings| VS
+    AI <-->|HTTP/REST API MCP Protocol| MS
+    MS -->|Search queries| VS
+    MS -->|Retrieve & Post-process| AR
+    AR -.->|Agentic Mode| LLM
+    LLM -.->|Generate answers| AR
+    MS -->|Document retrieval| DS
+
+    CF -.->|Configure| MS
+    CF -.->|Configure| FW
+    CF -.->|Configure| VS
+    CF -.->|Configure| AR
+    CF -.->|Configure| ES
+
     classDef component fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     classDef external fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
     classDef utility fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
-    
+
     class MS,VS,FW,AR component
     class DS,AI,LLM external
     class DL,QS,ES,CF utility

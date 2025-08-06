@@ -34,7 +34,7 @@ def create_reader(config: Config) -> BaseReader:
     """
     reader_type = config.paths.type.lower()
 
-    logger.info(f"Creating document reader of type: {reader_type}")
+    logger.debug(f"Creating document reader of type: {reader_type}")
 
     if reader_type == "obsidian":
         vault_path = config.get_vault_path()
@@ -117,7 +117,7 @@ def load_documents(config: Config) -> List[Document]:
                     )
                     return []
 
-                logger.info(
+                logger.debug(
                     (
                         f"Found {len(files_to_load)} files to load "
                         f"after applying prefix filter."
@@ -132,7 +132,7 @@ def load_documents(config: Config) -> List[Document]:
                         input_dir=str(vault_path),
                         config=config,
                     )
-                    logger.info(
+                    logger.debug(
                         (
                             f"Loading documents with {reader.__class__.__name__} "
                             "(with filtering)"
@@ -141,7 +141,7 @@ def load_documents(config: Config) -> List[Document]:
                 else:  # standard
                     # Use SimpleDirectoryReader with file list for Standard reader
                     reader = SimpleDirectoryReader(input_files=files_to_load)
-                    logger.info(f"Loading documents with {reader.__class__.__name__}")
+                    logger.debug(f"Loading documents with {reader.__class__.__name__}")
             else:
                 # No filtering needed - but still use our custom readers to ensure
                 # proper metadata handling (especially file_path for Obsidian)
@@ -152,7 +152,7 @@ def load_documents(config: Config) -> List[Document]:
                         input_dir=str(vault_path),
                         config=config,
                     )
-                    logger.info(
+                    logger.debug(
                         f"Loading documents with {reader.__class__.__name__} "
                         f"(no filtering)"
                     )
@@ -165,7 +165,7 @@ def load_documents(config: Config) -> List[Document]:
 
             # 3. Load the documents
             documents = reader.load_data()
-            logger.info(f"Successfully loaded {len(documents)} documents.")
+            logger.debug(f"Successfully loaded {len(documents)} documents.")
             return documents
 
         # This part should not be reached if config is validated, but as a safeguard:

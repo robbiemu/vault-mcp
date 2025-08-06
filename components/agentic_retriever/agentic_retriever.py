@@ -403,7 +403,7 @@ class ChunkRewriterPostprocessor(BaseNodePostprocessor):
             section_tool = SectionRetrievalTool()
             headers_tool = SectionHeadersTool()
 
-            logger.info(f"Creating tools for {len(nodes)} nodes...")
+            logger.debug(f"Creating tools for {len(nodes)} nodes...")
 
             for i, node in enumerate(nodes):
                 doc_id = node.node.metadata.get("document_id")
@@ -792,7 +792,7 @@ def create_agentic_query_engine(
         query_engine: Union[BaseQueryEngine, ExpandedSourceQueryEngine]
         if config.retrieval.mode == "static":
             query_engine = ExpandedSourceQueryEngine(base_query_engine, postprocessor)
-            logger.info(
+            logger.debug(
                 "Wrapped with ExpandedSourceQueryEngine to return expanded sections"
             )
         else:

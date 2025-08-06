@@ -62,7 +62,7 @@ def create_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def initialize_service_from_args(
+async def initialize_service_from_args(
     args: argparse.Namespace,
 ) -> Tuple[Config, VaultService]:
     """
@@ -83,6 +83,8 @@ def initialize_service_from_args(
         A tuple containing the loaded Config object and the fully initialized
         VaultService instance.
     """
+    # Configure logging to output to console
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(message)s")
     logger.info("Initializing application core services...")
 
     # 1. Load configuration from TOML files
@@ -127,10 +129,12 @@ def initialize_service_from_args(
 
     # 5. Initialize the core VaultService
     # This is the central business logic layer that uses all other components.
-    logger.info("Initializing VaultService...")
+    logger.debug("Initializing VaultService...")
     service = VaultService(
         config=config, vector_store=vector_store, query_engine=query_engine
     )
+    logger.info("Performing initial vault indexing...")
+    await service.reindex_vault()
 
     logger.info("Core services initialized successfully.")
     return config, service

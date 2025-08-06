@@ -42,7 +42,7 @@ async def main() -> None:
         args.serve_mcp = True
 
     # 1. Initialize the single, shared VaultService instance.
-    config, service = initialize_service_from_args(args)
+    config, service = await initialize_service_from_args(args)
 
     server_tasks = []
 

@@ -158,7 +158,7 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
 
             client = OpenAI(api_key=api_key, base_url=endpoint_url)
             model_name_attr = model_name
-            logger.info(
+            logger.debug(
                 f"Initialized OpenAI-compatible client for {model_name} "
                 f"at {endpoint_url}"
             )

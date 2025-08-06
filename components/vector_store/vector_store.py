@@ -108,7 +108,7 @@ class VectorStore:
                 ids=chunk_ids,
             )
 
-            logger.info(f"Added {len(chunks)} chunks to vector store")
+            logger.debug(f"Added {len(chunks)} chunks to vector store")
 
         except Exception as e:
             logger.error(f"Error adding chunks to vector store: {e}")

@@ -1,17 +1,14 @@
 """Integration tests for the complete vault MCP system."""
 
 import contextlib
-import tempfile
 
-# Import the global variables from the main module
-import components.mcp_server.main as server_main
 import pytest
+from components.api_app.main import create_app
 from components.document_processing import ChunkQualityScorer
-from components.mcp_server.main import app
-from components.vector_store.vector_store import VectorStore
+from components.vault_service.main import VaultService
 from fastapi.testclient import TestClient
 from llama_index.core.node_parser import MarkdownNodeParser
-from vault_mcp.config import (
+from shared.config import (
     Config,
     EmbeddingModelConfig,
     IndexingConfig,
@@ -36,43 +33,33 @@ def integration_config(temp_vault_dir):
     )
 
 
-@pytest.fixture(scope="function", autouse=True)
-def initialize_server():
-    # Load the configuration
-    server_main.config = Config(
-        paths=PathsConfig(vault_dir=str(tempfile.mkdtemp())),  # Temp dir for testing
-        prefix_filter=PrefixFilterConfig(allowed_prefixes=["Resource Balance Game"]),
-        indexing=IndexingConfig(
-            chunk_size=200,
-            chunk_overlap=50,
-            quality_threshold=0.3,  # Lower threshold for testing
-        ),
-        watcher=WatcherConfig(enabled=False),  # Disable for integration tests
+@pytest.fixture
+def test_service(integration_config, mock_vector_store):
+    """Create a test VaultService instance."""
+    service = VaultService(
+        config=integration_config,
+        vector_store=mock_vector_store,
+        query_engine=None
     )
-
-    # Initialize other components
-    server_main.node_parser = MarkdownNodeParser.from_defaults()
-    server_main.vector_store = VectorStore(
-        embedding_config=server_main.config.embedding_model,
-        persist_directory=server_main.config.paths.database_dir,
-    )
+    return service
 
 
 @pytest.fixture
-def client():
+def client(test_service):
     """Create a test client for the FastAPI app."""
-    # Create TestClient with lifespan events enabled
+    app = create_app(test_service)
     with TestClient(app) as test_client:
         yield test_client
 
 
-def test_full_document_workflow(fs, client, sample_markdown_files, integration_config):
+def test_full_document_workflow(
+    client, sample_markdown_files, integration_config, mock_vector_store
+):
     """Test the complete workflow from file processing to API responses."""
     # This test would require modifying the main app to accept test configuration
     # For now, we test individual components integration
 
-    # Create virtual directory for ChromaDB
-    fs.create_dir("/tmp/test_chroma_integration")
+
 
     # Initialize components using new pipeline
     node_parser = MarkdownNodeParser.from_defaults()
@@ -82,14 +69,7 @@ def test_full_document_workflow(fs, client, sample_markdown_files, integration_c
         provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
     )
 
-    try:
-        vector_store = VectorStore(
-            embedding_config=embedding_config,
-            persist_directory="/tmp/test_chroma_integration",
-            collection_name="integration_test",
-        )
-    except Exception as e:
-        pytest.skip(f"Skipping test due to model download issue: {e}")
+    vector_store = mock_vector_store
 
     try:
         # Load and process documents using new pipeline
@@ -157,15 +137,8 @@ def test_full_document_workflow(fs, client, sample_markdown_files, integration_c
 
 def test_api_endpoints_basic(client):
     """Test basic API endpoint availability."""
-    # Test info endpoint
-    response = client.get("/mcp/info")
-    assert response.status_code == 200
-    data = response.json()
-    assert "mcp_version" in data
-    assert "capabilities" in data
-
-    # Test files endpoint
-    response = client.get("/mcp/files")
+    # Test files endpoint (updated to new API structure)
+    response = client.get("/files")
     assert response.status_code == 200
     data = response.json()
     assert "files" in data
@@ -176,19 +149,18 @@ def test_query_endpoint(client):
     """Test query endpoint with proper request format."""
     query_data = {"query": "test search query", "limit": 5}
 
-    response = client.post("/mcp/query", json=query_data)
+    response = client.post("/query", json=query_data)
     assert response.status_code == 200
 
     data = response.json()
-    # Note: After migration to agentic architecture, answer field is removed
-    # and only sources are returned
+    # Updated for new API structure - sources field contains results
     assert "sources" in data
     assert isinstance(data["sources"], list)
 
 
 def test_reindex_endpoint(client):
     """Test reindex endpoint."""
-    response = client.post("/mcp/reindex")
+    response = client.post("/reindex")
     assert response.status_code == 200
 
     data = response.json()
@@ -215,10 +187,11 @@ def test_config_integration(integration_config, temp_vault_dir):
     assert vault_path == temp_vault_dir.resolve()
 
 
-def test_markdown_to_vector_pipeline(fs, integration_config, temp_vault_dir):
+def test_markdown_to_vector_pipeline(
+    integration_config, temp_vault_dir, mock_vector_store
+):
     """Test the complete pipeline from markdown to searchable vectors."""
-    # Create virtual directory for ChromaDB
-    fs.create_dir("/tmp/test_pipeline_chroma")
+
 
     # Create a test markdown file
     test_file = temp_vault_dir / "Resource Balance Game - Pipeline Test.md"
@@ -244,14 +217,7 @@ The system should be able to find this content when searching for relevant terms
         provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
     )
 
-    try:
-        vector_store = VectorStore(
-            embedding_config=embedding_config,
-            persist_directory="/tmp/test_pipeline_chroma",
-            collection_name="pipeline_test",
-        )
-    except Exception as e:
-        pytest.skip(f"Skipping test due to model download issue: {e}")
+    vector_store = mock_vector_store
 
     try:
         # Process the file using new pipeline

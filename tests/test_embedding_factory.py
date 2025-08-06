@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from components.embedding_system import create_embedding_model
-from vault_mcp.config import EmbeddingModelConfig
+from shared.config import EmbeddingModelConfig
 
 
 class TestEmbeddingFactory:

@@ -4,7 +4,7 @@ from typing import Any, List, Protocol, cast
 
 from llama_index.core.embeddings import BaseEmbedding
 from pydantic import Field
-from vault_mcp.config import EmbeddingModelConfig
+from shared.config import EmbeddingModelConfig
 
 logger = logging.getLogger(__name__)
 

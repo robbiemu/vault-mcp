@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 from llama_index.core.node_parser import MarkdownNodeParser
-from vault_mcp.config import (
+from shared.config import (
     Config,
     IndexingConfig,
     JoplinConfig,

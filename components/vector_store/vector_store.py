@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Mapping, Union, cast
 import chromadb
 from chromadb.config import Settings
 from components.embedding_system import EmbeddingModel, create_embedding_model
-from components.mcp_server.models import ChunkMetadata
-from vault_mcp.config import EmbeddingModelConfig
+from components.vault_service.models import ChunkMetadata
+from shared.config import EmbeddingModelConfig
 
 logger = logging.getLogger(__name__)
 

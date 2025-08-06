@@ -58,7 +58,8 @@ class ServerConfig(BaseModel):
     """Configuration for the server."""
 
     host: str = Field(default="127.0.0.1", description="Server host")
-    port: int = Field(default=8000, description="Server port")
+    api_port: int = Field(default=8000, description="API Server port")
+    mcp_port: int = Field(default=8000, description="MCP Server port")
     default_query_limit: int = Field(
         default=5, description="Default number of results returned for queries"
     )

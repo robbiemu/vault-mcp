@@ -8,7 +8,7 @@ from typing import Any, List, Optional, cast
 from llama_index.core.schema import Document
 from llama_index.readers.obsidian import ObsidianReader
 from llama_index.readers.obsidian.base import is_hardlink
-from vault_mcp.config import Config
+from shared.config import Config
 
 logger = logging.getLogger(__name__)
 

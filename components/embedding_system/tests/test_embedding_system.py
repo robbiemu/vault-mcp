@@ -1,7 +1,7 @@
 import unittest
 
 from components.embedding_system import create_embedding_model
-from vault_mcp.config import load_config
+from shared.config import load_config
 
 
 class TestEmbeddingSystem(unittest.TestCase):

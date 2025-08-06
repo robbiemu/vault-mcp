@@ -3,8 +3,8 @@
 import contextlib
 
 import pytest
-from components.mcp_server.models import ChunkMetadata
-from vault_mcp.config import EmbeddingModelConfig
+from components.vault_service.models import ChunkMetadata
+from shared.config import EmbeddingModelConfig
 
 from ..vector_store import VectorStore
 

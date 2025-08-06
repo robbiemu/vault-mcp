@@ -5,7 +5,7 @@ from typing import Any, List
 from components.embedding_system import (
     OpenAIEndpointEmbedding,
 )
-from vault_mcp.config import EmbeddingModelConfig
+from shared.config import EmbeddingModelConfig
 
 logger = logging.getLogger(__name__)
 

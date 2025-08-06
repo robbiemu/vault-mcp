@@ -8,7 +8,7 @@ from llama_index.core.readers.base import BaseReader
 from llama_index.core.schema import Document
 from llama_index.readers.joplin import JoplinReader
 from llama_index.readers.obsidian import ObsidianReader
-from vault_mcp.config import Config
+from shared.config import Config
 
 from .obsidian_reader_with_filter import ObsidianReaderWithFilter
 

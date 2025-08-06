@@ -1,5 +1,3 @@
-# components/agentic_retriever/agentic_retriever.py
-
 from __future__ import annotations
 
 import asyncio
@@ -22,7 +20,7 @@ from llama_index.core.schema import MetadataMode, NodeWithScore, QueryBundle, Te
 from llama_index.core.tools import BaseTool, FunctionTool
 from llama_index.llms.litellm import LiteLLM
 from llama_index.vector_stores.chroma import ChromaVectorStore
-from vault_mcp.config import Config
+from shared.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -376,7 +374,7 @@ class ChunkRewriterPostprocessor(BaseNodePostprocessor):
             return nodes
 
         try:
-            # Run async postprocessing using modern asyncio.run()
+            # This is the async entry point
             return asyncio.run(self._apostprocess_nodes(nodes, query_bundle))
         except Exception as e:
             logger.error(f"Error in postprocessing: {e}")
@@ -655,9 +653,12 @@ def create_agentic_query_engine(
             if config.generation_model is None:
                 raise ValueError("generation_model is required for agentic mode")
 
+            # Ensure parameters is a dictionary, default to empty if None
+            llm_parameters = config.generation_model.parameters or {}
+
             llm = LiteLLM(
                 model=config.generation_model.model_name,
-                **config.generation_model.parameters,
+                **llm_parameters,
             )
             Settings.llm = llm
 

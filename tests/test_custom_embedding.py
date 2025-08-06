@@ -4,7 +4,7 @@ from abc import ABC
 
 import pytest
 from components.embedding_system import CustomEmbeddingWrapperBase
-from vault_mcp.config import EmbeddingModelConfig
+from shared.config import EmbeddingModelConfig
 
 
 def test_custom_embedding_wrapper_base_is_abstract():
@@ -21,9 +21,9 @@ def test_custom_embedding_wrapper_base_inheritance():
 
 def test_custom_embedding_wrapper_base_has_init_method():
     """Test that CustomEmbeddingWrapperBase has abstract __init__ method."""
-    assert hasattr(CustomEmbeddingWrapperBase, '__init__')
+    assert hasattr(CustomEmbeddingWrapperBase, "__init__")
     # Check that it's marked as abstract
-    assert getattr(CustomEmbeddingWrapperBase.__init__, '__isabstractmethod__', False)
+    assert getattr(CustomEmbeddingWrapperBase.__init__, "__isabstractmethod__", False)
 
 
 def test_concrete_implementation_can_be_created():
@@ -34,10 +34,7 @@ def test_concrete_implementation_can_be_created():
             self.config = config
             self.kwargs = kwargs
 
-    config = EmbeddingModelConfig(
-        provider="test",
-        model_name="test-model"
-    )
+    config = EmbeddingModelConfig(provider="test", model_name="test-model")
 
     embedding = ConcreteEmbedding(config, extra_param="test")
     assert embedding is not None
@@ -51,10 +48,7 @@ def test_subclass_must_implement_init():
     class IncompleteEmbedding(CustomEmbeddingWrapperBase):
         pass  # Missing __init__ implementation
 
-    config = EmbeddingModelConfig(
-        provider="test",
-        model_name="test-model"
-    )
+    config = EmbeddingModelConfig(provider="test", model_name="test-model")
 
     # Should raise TypeError because abstract method not implemented
     with pytest.raises(TypeError):

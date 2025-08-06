@@ -13,7 +13,7 @@ from llama_index.core.node_parser import (
     MarkdownNodeParser,
     TokenTextSplitter,
 )
-from vault_mcp.config import Config
+from shared.config import Config
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 

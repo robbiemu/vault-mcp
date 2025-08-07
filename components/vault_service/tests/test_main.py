@@ -199,16 +199,72 @@ class TestVaultService:
         )
 
     @pytest.mark.asyncio
-    async def test_reindex_vault_success(self, vault_service, mock_vector_store):
-        """Test successful vault reindexing."""
-        with patch.object(vault_service, "_perform_indexing", return_value=3):
+    async def test_reindex_vault_no_changes(self, vault_service, mock_vector_store):
+        """Test reindexing when no files have changed."""
+        # Mock the StateTracker to report no changes
+        with patch.object(vault_service.state_tracker, 'generate_tree_from_vault', return_value=(Mock(root=b'123'), {'file1.md': 'hash1'})) as mock_gen_tree, \
+             patch.object(vault_service.state_tracker, 'load_state', return_value=('1ddfb731e4339943441804474f7559c5443666a35332124e390492ab3a697e68', {'file1.md': 'hash1'})) as mock_load_state:
+
+            # Create a mock for the MerkleTree root object
+            mock_tree = mock_gen_tree.return_value[0]
+            mock_tree.root.hexdigest.return_value = '1ddfb731e4339943441804474f7559c5443666a35332124e390492ab3a697e68'
+
             result = await vault_service.reindex_vault()
 
             assert result["success"] is True
-            assert result["message"] == "Reindexing completed successfully."
-            assert result["files_processed"] == 3
+            assert result["message"] == "No changes detected."
+            assert result["files_processed"] == 0
+            mock_vector_store.remove_file_chunks.assert_not_called()
+            mock_vector_store.add_chunks.assert_not_called()
 
-            mock_vector_store.clear_all.assert_called_once()
+    @pytest.mark.asyncio
+    async def test_reindex_vault_with_changes(self, vault_service, mock_vector_store, tmp_path):
+        """Test reindexing with added, updated, and removed files."""
+        # Mock documents and nodes
+        mock_documents = [Mock()]
+        mock_nodes = [Mock()]
+        mock_nodes[0].get_content.return_value = "Test content"
+
+        with patch.object(vault_service.state_tracker, 'generate_tree_from_vault') as mock_gen_tree, \
+             patch.object(vault_service.state_tracker, 'load_state') as mock_load_state, \
+             patch.object(vault_service.state_tracker, 'compare_states') as mock_compare, \
+             patch.object(vault_service.state_tracker, 'save_state') as mock_save, \
+             patch("components.vault_service.main.load_documents", return_value=mock_documents) as mock_load_docs, \
+             patch("llama_index.core.node_parser.MarkdownNodeParser.get_nodes_from_documents", return_value=mock_nodes), \
+             patch("components.vault_service.main.SentenceSplitter") as mock_splitter_class, \
+             patch("components.vault_service.main.convert_nodes_to_chunks", return_value=[{"score": 0.9, "text": "chunk"}]):
+
+            # Setup mocks
+            mock_splitter = Mock()
+            mock_splitter.get_nodes_from_documents.return_value = mock_nodes
+            mock_splitter_class.return_value = mock_splitter
+
+            mock_tree = Mock()
+            mock_tree.root.hexdigest.return_value = 'new_hash'
+            mock_gen_tree.return_value = (mock_tree, {'added.md': 'hash_new', 'updated.md': 'hash_updated_new'})
+            mock_load_state.return_value = ('old_hash', {'updated.md': 'hash_updated_old', 'removed.md': 'hash_removed'})
+
+            changes = {"added": ["added.md"], "updated": ["updated.md"], "removed": ["removed.md"]}
+            mock_compare.return_value = changes
+
+            # Run reindex
+            result = await vault_service.reindex_vault()
+
+            # Assertions
+            assert result["success"] is True
+            assert result["files_processed"] == 2
+            assert result["changes"] == {"added": 1, "updated": 1, "removed": 1}
+
+            # Check that vector store was updated correctly
+            mock_vector_store.remove_file_chunks.assert_any_call("removed.md")
+            mock_vector_store.remove_file_chunks.assert_any_call("updated.md")
+            assert mock_vector_store.remove_file_chunks.call_count == 2
+
+            mock_load_docs.assert_called_once_with(vault_service.config, files_to_process=['added.md', 'updated.md'])
+            mock_vector_store.add_chunks.assert_called_once()
+
+            # Check that new state was saved
+            mock_save.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_perform_indexing_no_documents(self, vault_service, tmp_path):

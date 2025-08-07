@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import toml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +126,8 @@ class JoplinConfig(BaseModel):
 
 class Config(BaseModel):
     """Main configuration model."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     paths: PathsConfig
     prefix_filter: PrefixFilterConfig = Field(default_factory=PrefixFilterConfig)

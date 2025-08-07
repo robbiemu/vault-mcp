@@ -236,7 +236,9 @@ chroma.sqlite3
 
 # .aiderCode.md
 GEMINI.[Mm][Dd]
-[Ww]arp.md
+# [Ww]arp.md
+.crush/
+# CRUSH.MD
 
 project_bundle.zip
 *.task.md

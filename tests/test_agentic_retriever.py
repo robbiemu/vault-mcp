@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock, Mock, patch
+from pydantic import ConfigDict
 
 import pytest
 from components.agentic_retriever.agentic_retriever import (
@@ -27,8 +28,7 @@ class StreamingMockLLM(MockLLM):
             message=ChatMessage(role="assistant", content="Rewritten content")
         )
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 @pytest.fixture

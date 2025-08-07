@@ -38,23 +38,16 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
+    "pytest>=8.4.1",
     "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.1.0",
+    "pytest-cov>=6.2.1",
     "pytest-timeout>=2.1.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
     "mypy>=1.5.0",
     "bandit>=1.7.0",
     "pre-commit>=3.0.0",
-    "pyfakefs>=5.0.0",
-]
-
-[dependency-groups]
-dev = [
     "pyfakefs>=5.9.2",
-    "pytest>=8.4.1",
-    "pytest-cov>=6.2.1",
     "types-toml>=0.10.8.20240310",
 ]
 

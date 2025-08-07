@@ -12,9 +12,10 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from pymerkle import BaseMerkleTree as MerkleTree
+from pymerkle import InmemoryTree as MerkleTree
 
 logger = logging.getLogger(__name__)
+
 
 class StateTracker:
     """
@@ -64,7 +65,7 @@ class StateTracker:
                 if file_path.is_file():
                     content_hash = self._hash_file_content(file_path)
                     manifest[str(file_path)] = content_hash
-                    tree.update(content_hash.encode('utf-8'))
+                    tree.append_entry(content_hash.encode('utf-8'))
 
         return tree, manifest
 
@@ -77,10 +78,14 @@ class StateTracker:
             manifest: The dictionary mapping file paths to their content hashes.
         """
         state = {
-            "root_hash": tree.root.hexdigest() if tree.root else None,
+            "root_hash": tree.get_state().hex() if tree.get_size() > 0 else None,
             "manifest": manifest,
         }
-        with open(self.state_file_path, 'w', encoding='utf-8') as f:
+        # Ensure the directory for the state file exists
+        state_file_path = Path(self.state_file_path)
+        state_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(state_file_path, 'w', encoding='utf-8') as f:
             json.dump(state, f, indent=4)
         logger.info(f"Saved new state with root hash {state['root_hash']} to {self.state_file_path}")
 

@@ -1,5 +1,8 @@
 """Tests for VaultService main functionality."""
 
+import json
+import tempfile
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -13,6 +16,7 @@ from shared.config import (
     ServerConfig,
     WatcherConfig,
 )
+from shared.state_tracker import StateTracker
 
 from ..main import VaultService
 
@@ -24,6 +28,7 @@ def test_config(tmp_path):
         paths=PathsConfig(
             vault_dir=str(tmp_path),
             database_dir=str(tmp_path / "test_db"),
+            data_dir=str(tmp_path / "data"),
             type="Standard",
         ),
         indexing=IndexingConfig(
@@ -89,6 +94,12 @@ class TestVaultService:
         assert service.vector_store == mock_vector_store
         assert service.query_engine is None
         assert service.node_parser is not None
+        # Verify StateTracker was initialized correctly
+        assert isinstance(service.state_tracker, StateTracker)
+        assert service.state_tracker.vault_path == Path(test_config.paths.vault_dir)
+        assert service.state_tracker.state_file_path == str(
+            Path(test_config.paths.data_dir) / "index_state.json"
+        )
 
     def test_list_all_files(self, vault_service, mock_vector_store):
         """Test listing all indexed files."""
@@ -116,7 +127,9 @@ class TestVaultService:
             vault_service.get_document_content("/nonexistent/file.md")
 
     def test_search_chunks_with_vector_store_fallback(
-        self, vault_service, mock_vector_store
+        self,
+        vault_service,
+        mock_vector_store,
     ):
         """Test search_chunks when using vector store fallback."""
         results = vault_service.search_chunks("test query", limit=2)
@@ -177,7 +190,9 @@ class TestVaultService:
         mock_query_engine.query.assert_called_once_with("test query")
 
     def test_search_chunks_query_engine_fallback_on_error(
-        self, test_config, mock_vector_store
+        self,
+        test_config,
+        mock_vector_store,
     ):
         """Test search_chunks falls back to vector store when query engine fails."""
         # Create failing query engine
@@ -202,12 +217,15 @@ class TestVaultService:
     async def test_reindex_vault_no_changes(self, vault_service, mock_vector_store):
         """Test reindexing when no files have changed."""
         # Mock the StateTracker to report no changes
-        with patch.object(vault_service.state_tracker, 'generate_tree_from_vault', return_value=(Mock(root=b'123'), {'file1.md': 'hash1'})) as mock_gen_tree, \
-             patch.object(vault_service.state_tracker, 'load_state', return_value=('1ddfb731e4339943441804474f7559c5443666a35332124e390492ab3a697e68', {'file1.md': 'hash1'})) as mock_load_state:
+        with patch.object(
+            vault_service.state_tracker, "generate_tree_from_vault", return_value=(Mock(get_size=Mock(return_value=1), get_state=Mock(return_value=b"123")), {"file1.md": "hash1"})
+        ) as mock_gen_tree, patch.object(
+            vault_service.state_tracker, "load_state", return_value=("1ddfb731e4339943441804474f7559c5443666a35332124e390492ab3a697e68", {"file1.md": "hash1"})
+        ) as mock_load_state:
 
             # Create a mock for the MerkleTree root object
             mock_tree = mock_gen_tree.return_value[0]
-            mock_tree.root.hexdigest.return_value = '1ddfb731e4339943441804474f7559c5443666a35332124e390492ab3a697e68'
+            mock_tree.get_state.return_value = b"1ddfb731e4339943441804474f7559c5443666a35332124e390492ab3a697e68"
 
             result = await vault_service.reindex_vault()
 
@@ -218,21 +236,36 @@ class TestVaultService:
             mock_vector_store.add_chunks.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_reindex_vault_with_changes(self, vault_service, mock_vector_store, tmp_path):
+    async def test_reindex_vault_with_changes(
+        self,
+        vault_service,
+        mock_vector_store,
+        tmp_path,
+    ):
         """Test reindexing with added, updated, and removed files."""
         # Mock documents and nodes
         mock_documents = [Mock()]
         mock_nodes = [Mock()]
         mock_nodes[0].get_content.return_value = "Test content"
+        mock_nodes[0].metadata = {}
 
-        with patch.object(vault_service.state_tracker, 'generate_tree_from_vault') as mock_gen_tree, \
-             patch.object(vault_service.state_tracker, 'load_state') as mock_load_state, \
-             patch.object(vault_service.state_tracker, 'compare_states') as mock_compare, \
-             patch.object(vault_service.state_tracker, 'save_state') as mock_save, \
-             patch("components.vault_service.main.load_documents", return_value=mock_documents) as mock_load_docs, \
-             patch("llama_index.core.node_parser.MarkdownNodeParser.get_nodes_from_documents", return_value=mock_nodes), \
-             patch("components.vault_service.main.SentenceSplitter") as mock_splitter_class, \
-             patch("components.vault_service.main.convert_nodes_to_chunks", return_value=[{"score": 0.9, "text": "chunk"}]):
+        with patch.object(vault_service.state_tracker, "generate_tree_from_vault") as mock_gen_tree, patch.object(
+            vault_service.state_tracker, "load_state"
+        ) as mock_load_state, patch.object(
+            vault_service.state_tracker, "compare_states"
+        ) as mock_compare, patch.object(
+            vault_service.state_tracker, "save_state"
+        ) as mock_save, patch(
+            "components.vault_service.main.load_documents", return_value=mock_documents
+        ) as mock_load_docs, patch(
+            "llama_index.core.node_parser.MarkdownNodeParser.get_nodes_from_documents",
+            return_value=mock_nodes,
+        ), patch(
+            "components.vault_service.main.SentenceSplitter"
+        ) as mock_splitter_class, patch(
+            "components.vault_service.main.convert_nodes_to_chunks",
+            return_value=[{"score": 0.9, "text": "chunk"}],
+        ):
 
             # Setup mocks
             mock_splitter = Mock()
@@ -240,11 +273,22 @@ class TestVaultService:
             mock_splitter_class.return_value = mock_splitter
 
             mock_tree = Mock()
-            mock_tree.root.hexdigest.return_value = 'new_hash'
-            mock_gen_tree.return_value = (mock_tree, {'added.md': 'hash_new', 'updated.md': 'hash_updated_new'})
-            mock_load_state.return_value = ('old_hash', {'updated.md': 'hash_updated_old', 'removed.md': 'hash_removed'})
+            mock_tree.get_size.return_value = 1
+            mock_tree.get_state.return_value = b"new_hash"
+            mock_gen_tree.return_value = (
+                mock_tree,
+                {"added.md": "hash_new", "updated.md": "hash_updated_new"},
+            )
+            mock_load_state.return_value = (
+                "old_hash",
+                {"updated.md": "hash_updated_old", "removed.md": "hash_removed"},
+            )
 
-            changes = {"added": ["added.md"], "updated": ["updated.md"], "removed": ["removed.md"]}
+            changes = {
+                "added": ["added.md"],
+                "updated": ["updated.md"],
+                "removed": ["removed.md"],
+            }
             mock_compare.return_value = changes
 
             # Run reindex
@@ -260,11 +304,127 @@ class TestVaultService:
             mock_vector_store.remove_file_chunks.assert_any_call("updated.md")
             assert mock_vector_store.remove_file_chunks.call_count == 2
 
-            mock_load_docs.assert_called_once_with(vault_service.config, files_to_process=['added.md', 'updated.md'])
+            mock_load_docs.assert_called_once_with(
+                vault_service.config, files_to_process=["added.md", "updated.md"]
+            )
             mock_vector_store.add_chunks.assert_called_once()
 
             # Check that new state was saved
             mock_save.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_reindex_vault_with_changes_and_quality_filtering(
+        self,
+        vault_service,
+        mock_vector_store,
+        tmp_path,
+    ):
+        """Test reindexing with changes and quality filtering enabled."""
+        # Configure service to enable quality filtering
+        vault_service.config.indexing.enable_quality_filter = True
+        vault_service.config.indexing.quality_threshold = 0.5
+
+        # Mock documents, nodes and chunks with quality scores
+        mock_documents = [Mock()]
+        mock_nodes = [Mock()]
+        mock_nodes[0].get_content.return_value = "Test content"
+        mock_nodes[0].metadata = {}
+
+        mock_chunks = [
+            {"score": 0.9, "text": "high quality chunk", "file_path": "added.md"},
+            {"score": 0.3, "text": "low quality chunk", "file_path": "added.md"},
+        ]
+        filtered_chunks = [mock_chunks[0]]  # Only high quality chunk passes filter
+
+        with patch.object(vault_service.state_tracker, "generate_tree_from_vault") as mock_gen_tree, patch.object(
+            vault_service.state_tracker, "load_state"
+        ) as mock_load_state, patch.object(
+            vault_service.state_tracker, "compare_states"
+        ) as mock_compare, patch.object(
+            vault_service.state_tracker, "save_state"
+        ) as mock_save, patch(
+            "components.vault_service.main.load_documents"
+        ) as mock_load_docs, patch(
+            "llama_index.core.node_parser.MarkdownNodeParser.get_nodes_from_documents",
+            return_value=mock_nodes,
+        ), patch(
+            "components.vault_service.main.SentenceSplitter"
+        ) as mock_splitter_class, patch(
+            "components.vault_service.main.convert_nodes_to_chunks", return_value=mock_chunks
+        ):
+
+            # Setup mocks for tree generation
+            mock_tree = Mock()
+            mock_tree.get_size.return_value = 1
+            mock_tree.get_state.return_value = b"new_hash"
+            mock_gen_tree.return_value = (
+                mock_tree,
+                {"added.md": "hash_new", "updated.md": "hash_updated_new"},
+            )
+            mock_load_state.return_value = (
+                "old_hash",
+                {"updated.md": "hash_updated_old", "removed.md": "hash_removed"},
+            )
+
+            # Setup splitter mock
+            mock_splitter = Mock()
+            mock_splitter.get_nodes_from_documents.return_value = mock_nodes
+            mock_splitter_class.return_value = mock_splitter
+
+            # Setup compare states mock
+            changes = {
+                "added": ["added.md"],
+                "updated": ["updated.md"],
+                "removed": ["removed.md"],
+            }
+            mock_compare.return_value = changes
+
+            # Run reindex
+            result = await vault_service.reindex_vault()
+
+            # Assertions
+            assert result["success"] is True
+            
+            # Check that only filtered chunks were added
+            mock_load_docs.assert_called_once()
+            mock_vector_store.add_chunks.assert_called_once_with(filtered_chunks)
+            mock_save.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_reindex_vault_error_handling(
+        self,
+        vault_service,
+        mock_vector_store,
+        tmp_path,
+    ):
+        """Test reindexing handles errors appropriately."""
+        with patch.object(
+            vault_service.state_tracker, "generate_tree_from_vault"
+        ) as mock_gen_tree, patch.object(
+            vault_service.state_tracker, "load_state"
+        ), patch.object(
+            vault_service.state_tracker, "compare_states"
+        ), patch.object(
+            vault_service.state_tracker, "save_state"
+        ), patch(
+            "components.vault_service.main.load_documents",
+            side_effect=Exception("Test error"),
+        ):
+
+            # Setup mocks to return different hashes to trigger processing
+            mock_tree = Mock()
+            mock_tree.get_size.return_value = 1
+            mock_tree.get_state.return_value = b"new_hash"
+            mock_gen_tree.return_value = (mock_tree, {"added.md": "hash_new"})
+
+            # Run reindex - should handle error gracefully
+            result = await vault_service.reindex_vault()
+
+            # Should still save state even when processing fails
+            assert result["success"] is True
+            assert "files_processed" in result
+            # State should still be saved despite error
+            assert vault_service.state_tracker.save_state.called
 
     @pytest.mark.asyncio
     async def test_perform_indexing_no_documents(self, vault_service, tmp_path):
@@ -277,7 +437,10 @@ class TestVaultService:
 
     @pytest.mark.asyncio
     async def test_perform_indexing_with_documents(
-        self, vault_service, mock_vector_store, tmp_path
+        self,
+        vault_service,
+        mock_vector_store,
+        tmp_path,
     ):
         """Test _perform_indexing with documents."""
         (tmp_path / "dummy.md").touch()
@@ -285,6 +448,7 @@ class TestVaultService:
         mock_documents = [Mock()]
         mock_nodes = [Mock()]
         mock_nodes[0].get_content.return_value = "Test content"
+        mock_nodes[0].metadata = {}
 
         with (
             patch(

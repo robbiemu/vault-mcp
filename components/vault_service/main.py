@@ -13,6 +13,8 @@ Responsibilities:
 import logging
 from typing import Any, Dict, List
 
+from pathlib import Path
+
 from components.document_processing import (
     ChunkQualityScorer,
     DocumentLoaderError,
@@ -46,8 +48,8 @@ class VaultService:
         self.vector_store = vector_store
         self.query_engine = query_engine
         self.state_tracker = StateTracker(
-            vault_path=str(self.config.vault.path),
-            state_file_path=str(self.config.server.data_dir / "index_state.json")
+            vault_path=str(self.config.paths.vault_dir),
+            state_file_path=str(Path(self.config.paths.data_dir) / "index_state.json")
         )
         # The node parser is needed for re-indexing logic
         self.node_parser = MarkdownNodeParser.from_defaults()
@@ -157,11 +159,11 @@ class VaultService:
                 chunk_size=self.config.indexing.chunk_size,
                 chunk_overlap=self.config.indexing.chunk_overlap,
             )
-            # Convert nodes to documents for the size splitter
+            # Convert nodes to documents for the size splitter, preserving metadata
             from llama_index.core import Document
 
             node_documents = [
-                Document(text=node.get_content()) for node in initial_nodes
+                Document(text=node.get_content(), metadata=node.metadata) for node in initial_nodes
             ]
             final_nodes = size_splitter.get_nodes_from_documents(node_documents)
 
@@ -199,9 +201,9 @@ class VaultService:
 
         # 1. Generate the Merkle tree for the current vault state
         new_tree, new_manifest = self.state_tracker.generate_tree_from_vault(
-            prefix_filter=self.config.vault.include
+            prefix_filter=self.config.prefix_filter.allowed_prefixes
         )
-        new_root_hash = new_tree.root.hexdigest() if new_tree.root else None
+        new_root_hash = new_tree.get_state() if new_tree.get_size() > 0 else None
 
         # 2. Load the persisted state from the last index
         old_root_hash, old_manifest = self.state_tracker.load_state()
@@ -230,44 +232,52 @@ class VaultService:
             for file_path in files_to_remove:
                 self.vector_store.remove_file_chunks(file_path)
 
-        # 6. Handle additions and updates (by adding new versions)
+        # 6. Handle additions and updates by processing only the changed files
         files_to_process = added_files + updated_files
         if files_to_process:
-            logger.info(f"Processing {len(files_to_process)} files for indexing.")
-            # This is a simplified version. In a real scenario, you'd want to
-            # modify _perform_indexing to accept a list of files.
-            # For now, we re-trigger a full scan but only operate on the diff.
-            # This part needs to be implemented carefully to only process the diff.
-            # A full re-implementation of _perform_indexing is needed to accept a list of files.
-            # Let's assume for now we re-index all, but in a perfect world, we'd do this:
-
-            # Simplified approach: re-run the _perform_indexing.
-            # This is NOT efficient and defeats the purpose, but it's a start.
-            # The right way is to adapt _perform_indexing to take a file list.
-            # Let's do a quick and dirty version for now.
+            logger.info(f"Processing {len(files_to_process)} added/updated files for indexing.")
             try:
+                # Use the existing document loading and processing pipeline
                 documents = load_documents(self.config, files_to_process=files_to_process)
                 if documents:
+                    # Two-stage parsing: structural then size-based
                     initial_nodes = self.node_parser.get_nodes_from_documents(documents)
                     size_splitter = SentenceSplitter(
                         chunk_size=self.config.indexing.chunk_size,
                         chunk_overlap=self.config.indexing.chunk_overlap,
                     )
+                    # Convert nodes to documents for the size splitter, preserving metadata
                     from llama_index.core import Document
-                    node_documents = [Document(text=node.get_content()) for node in initial_nodes]
+                    node_documents = [
+                        Document(text=node.get_content(), metadata=node.metadata) for node in initial_nodes
+                    ]
                     final_nodes = size_splitter.get_nodes_from_documents(node_documents)
+
                     quality_scorer = ChunkQualityScorer()
                     chunks = convert_nodes_to_chunks(final_nodes, quality_scorer)
+
                     if self.config.indexing.enable_quality_filter:
-                        quality_chunks = [c for c in chunks if c["score"] >= self.config.indexing.quality_threshold]
+                        quality_chunks = [
+                            c
+                            for c in chunks
+                            if c["score"] >= self.config.indexing.quality_threshold
+                        ]
                     else:
                         quality_chunks = chunks
+
                     if quality_chunks:
                         self.vector_store.add_chunks(quality_chunks)
+                        logger.info(f"Successfully indexed {len(quality_chunks)} chunks from changed files.")
+
             except Exception as e:
-                logger.error(f"Error processing changed files: {e}")
-                # Decide on error handling: rollback state? or proceed?
-                # For now, we'll log and continue to save the new state.
+                logger.error(f"Error processing changed files: {e}", exc_info=True)
+                # In case of an error, we should not save the new state to allow for a retry.
+                # We return an error response.
+                return {
+                    "success": False,
+                    "message": "An error occurred while processing file changes. The state has not been updated.",
+                    "error": str(e),
+                }
 
         # 7. Save the new state
         self.state_tracker.save_state(new_tree, new_manifest)

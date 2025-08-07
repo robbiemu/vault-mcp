@@ -1,0 +1,7 @@
+{
+    "root_hash": "99b083593073cada6f42a79f7ef54b8378aba0a4d2971e3e7598c2daeaecd8dc",
+    "manifest": {
+        "/private/var/folders/jr/27j8hrm57rnbk2jj0y81_g1h0000gp/T/pytest-of-macdev/pytest-15/test_reindex_endpoint0/dummy.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "/private/var/folders/jr/27j8hrm57rnbk2jj0y81_g1h0000gp/T/pytest-of-macdev/pytest-15/test_reindex_endpoint0/test_db/chroma.sqlite3": "a43921f751bebcae65c0247d4580844fa41fcf6d61ae30dfb4cd49b3da4fa8a5"
+    }
+}

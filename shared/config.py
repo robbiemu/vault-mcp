@@ -18,6 +18,10 @@ class PathsConfig(BaseModel):
         default="./chroma_db",
         description="Directory to store the ChromaDB vector database",
     )
+    data_dir: str = Field(
+        default="./data",
+        description="Directory to store application data, such as the index state file",
+    )
     type: str = Field(
         default="Standard",
         description="Type of document source: Standard, Obsidian, Joplin",

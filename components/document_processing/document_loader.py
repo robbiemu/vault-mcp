@@ -1,7 +1,7 @@
 """Document loader factory for creating appropriate readers based on configuration."""
 
 import logging
-from typing import List
+from typing import List, Optional
 
 from llama_index.core import SimpleDirectoryReader
 from llama_index.core.readers.base import BaseReader
@@ -75,12 +75,24 @@ def create_reader(config: Config) -> BaseReader:
         )
 
 
-def load_documents(config: Config) -> List[Document]:
+def load_documents(
+    config: Config, files_to_process: Optional[List[str]] = None
+) -> List[Document]:
     """
-    Load documents using the appropriate reader, applying prefix filters
-    efficiently before loading for filesystem-based readers.
+    Load documents using the appropriate reader.
+
+    If `files_to_process` is provided, it loads only those specific files.
+    Otherwise, it applies prefix filters efficiently for filesystem-based readers.
     """
     try:
+        # If a specific list of files is provided, load them directly.
+        if files_to_process:
+            logger.info(f"Loading {len(files_to_process)} specific files.")
+            reader: BaseReader = SimpleDirectoryReader(input_files=files_to_process)
+            documents = reader.load_data()
+            logger.debug(f"Successfully loaded {len(documents)} documents.")
+            return documents
+
         reader_type = config.paths.type.lower()
         vault_path = config.get_vault_path()
 
@@ -92,7 +104,7 @@ def load_documents(config: Config) -> List[Document]:
             logger.info(f"Successfully loaded {len(documents)} documents from Joplin.")
             return documents
 
-        # --- NEW "FILTER THEN LOAD" LOGIC FOR FILESYSTEM READERS ---
+        # --- "FILTER THEN LOAD" LOGIC FOR FILESYSTEM READERS ---
         if reader_type in ["standard", "obsidian"]:
             if not vault_path.exists():
                 logger.warning(f"Vault directory does not exist: {vault_path}")
@@ -110,65 +122,40 @@ def load_documents(config: Config) -> List[Document]:
 
                 if not files_to_load:
                     logger.info(
-                        (
-                            f"No files matching the prefix filter were found in "
-                            f"{vault_path}"
-                        )
+                        "No files matching the prefix filter were found "
+                        f"in {vault_path}"
                     )
                     return []
 
                 logger.debug(
-                    (
-                        f"Found {len(files_to_load)} files to load "
-                        f"after applying prefix filter."
-                    )
+                    f"Found {len(files_to_load)} files to load after applying "
+                    "prefix filter."
                 )
 
                 # 2. Choose the appropriate reader based on type
                 if reader_type == "obsidian":
-                    # Use our custom ObsidianReaderWithFilter to preserve
-                    #  Obsidian features
                     reader = ObsidianReaderWithFilter(
                         input_dir=str(vault_path),
                         config=config,
-                    )
-                    logger.debug(
-                        (
-                            f"Loading documents with {reader.__class__.__name__} "
-                            "(with filtering)"
-                        )
                     )
                 else:  # standard
-                    # Use SimpleDirectoryReader with file list for Standard reader
                     reader = SimpleDirectoryReader(input_files=files_to_load)
-                    logger.debug(f"Loading documents with {reader.__class__.__name__}")
             else:
-                # No filtering needed - but still use our custom readers to ensure
-                # proper metadata handling (especially file_path for Obsidian)
+                # No filtering needed
                 if reader_type == "obsidian":
-                    # Always use our custom ObsidianReaderWithFilter to ensure
-                    # file_path metadata
                     reader = ObsidianReaderWithFilter(
                         input_dir=str(vault_path),
                         config=config,
-                    )
-                    logger.debug(
-                        f"Loading documents with {reader.__class__.__name__} "
-                        f"(no filtering)"
                     )
                 else:  # standard
                     reader = create_reader(config)
-                    logger.info(
-                        f"Loading documents with {reader.__class__.__name__} "
-                        f"(no filtering)"
-                    )
 
             # 3. Load the documents
+            logger.info(f"Loading documents with {reader.__class__.__name__}")
             documents = reader.load_data()
             logger.debug(f"Successfully loaded {len(documents)} documents.")
             return documents
 
-        # This part should not be reached if config is validated, but as a safeguard:
         raise DocumentLoaderError(f"Unsupported reader type for loading: {reader_type}")
 
     except Exception as e:

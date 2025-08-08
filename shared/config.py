@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import toml
-from pydantic import BaseModel, Field, model_validator, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,10 @@ class PathsConfig(BaseModel):
     database_dir: str = Field(
         default="./chroma_db",
         description="Directory to store the ChromaDB vector database",
+    )
+    data_dir: str = Field(
+        default="./data",
+        description="Directory to store application data, such as the index state file",
     )
     type: str = Field(
         default="Standard",

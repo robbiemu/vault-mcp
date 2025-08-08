@@ -1,5 +1,4 @@
 from unittest.mock import AsyncMock, Mock, patch
-from pydantic import ConfigDict
 
 import pytest
 from components.agentic_retriever.agentic_retriever import (
@@ -13,6 +12,7 @@ from components.vector_store.vector_store import VectorStore
 from llama_index.core import VectorStoreIndex
 from llama_index.core.llms import ChatMessage, ChatResponse, MockLLM
 from llama_index.core.schema import MetadataMode, NodeWithScore, QueryBundle, TextNode
+from pydantic import ConfigDict
 from shared.config import (
     Config,
     EmbeddingModelConfig,

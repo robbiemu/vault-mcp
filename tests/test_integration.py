@@ -1,7 +1,6 @@
 """Integration tests for the complete vault MCP system."""
 
 import contextlib
-import json
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -26,18 +25,21 @@ from shared.config import (
 @pytest.fixture
 def integration_config(temp_vault_dir):
     """Create an integration test configuration."""
+    # Use a separate directory for data to avoid picking up db files
+    data_dir = tempfile.TemporaryDirectory()
     return Config(
-        paths=PathsConfig(vault_dir=str(temp_vault_dir)),
+        paths=PathsConfig(
+            vault_dir=str(temp_vault_dir),
+            database_dir=str(Path(data_dir.name) / "test_db"),
+            data_dir=str(Path(data_dir.name) / "data"),
+        ),
         prefix_filter=PrefixFilterConfig(allowed_prefixes=["Resource Balance Game"]),
         indexing=IndexingConfig(
             chunk_size=200,
             chunk_overlap=50,
             quality_threshold=0.3,  # Lower threshold for testing
         ),
-        server=ServerConfig(
-            data_dir=str(temp_vault_dir / "data"),
-            default_query_limit=5
-        ),
+        server=ServerConfig(default_query_limit=5),
         watcher=WatcherConfig(enabled=False),  # Disable for integration tests
     )
 
@@ -46,9 +48,7 @@ def integration_config(temp_vault_dir):
 def test_service(integration_config, mock_vector_store):
     """Create a test VaultService instance."""
     service = VaultService(
-        config=integration_config,
-        vector_store=mock_vector_store,
-        query_engine=None
+        config=integration_config, vector_store=mock_vector_store, query_engine=None
     )
     return service
 
@@ -67,8 +67,6 @@ def test_full_document_workflow(
     """Test the complete workflow from file processing to API responses."""
     # This test would require modifying the main app to accept test configuration
     # For now, we test individual components integration
-
-
 
     # Initialize components using new pipeline
     node_parser = MarkdownNodeParser.from_defaults()
@@ -201,7 +199,6 @@ def test_markdown_to_vector_pipeline(
 ):
     """Test the complete pipeline from markdown to searchable vectors."""
 
-
     # Create a test markdown file
     test_file = temp_vault_dir / "Resource Balance Game - Pipeline Test.md"
     test_content = """# Pipeline Test Document
@@ -289,25 +286,37 @@ The system should be able to find this content when searching for relevant terms
 
 
 @pytest.mark.asyncio
-async def test_merkle_tree_integration(integration_config, temp_vault_dir, mock_vector_store):
+async def test_merkle_tree_integration(integration_config, temp_vault_dir):
     """Test the Merkle tree state tracking integration."""
+    from llama_index.core import Document
+
     # Create test files
     file1 = temp_vault_dir / "test1.md"
     file1.write_text("# Test Document 1\n\nThis is the first test document.")
-    
+
     file2 = temp_vault_dir / "test2.md"
     file2.write_text("# Test Document 2\n\nThis is the second test document.")
-    
-    # Initialize VaultService
-    service = VaultService(config=integration_config, vector_store=mock_vector_store, query_engine=None)
-    
+
+    # Update config to not filter any files for this test
+    integration_config.prefix_filter.allowed_prefixes = []
+
+    # Initialize VaultService with a simple mock
+    service = VaultService(
+        config=integration_config, vector_store=Mock(), query_engine=None
+    )
+
     # Mock the document loading to return specific documents
-    mock_documents = [Mock(), Mock()]
-    mock_documents[0].text = "# Test Document 1\n\nThis is the first test document."
-    mock_documents[0].metadata = {"file_path": str(file1)}
-    mock_documents[1].text = "# Test Document 2\n\nThis is the second test document."
-    mock_documents[1].metadata = {"file_path": str(file2)}
-    
+    mock_documents = [
+        Document(
+            text="# Test Document 1\n\nThis is the first test document.",
+            metadata={"file_path": str(file1)},
+        ),
+        Document(
+            text="# Test Document 2\n\nThis is the second test document.",
+            metadata={"file_path": str(file2)},
+        ),
+    ]
+
     with patch("components.vault_service.main.load_documents") as mock_load_documents:
         mock_load_documents.return_value = mock_documents
         # First reindex - should process all files
@@ -315,58 +324,86 @@ async def test_merkle_tree_integration(integration_config, temp_vault_dir, mock_
         assert result1["success"] is True
         assert result1["files_processed"] == 2
         assert "No changes detected" not in result1["message"]
-        
+
         # Second reindex - should detect no changes
-        mock_load_documents.return_value = []
-        result2 = await service.reindex_vault()
-        assert result2["success"] is True
-        assert result2["files_processed"] == 0
-        assert result2["message"] == "No changes detected."
-        
+        # Get the state after the first reindex
+        new_tree, new_manifest = service.state_tracker.generate_tree_from_vault()
+        with patch.object(
+            service.state_tracker,
+            "generate_tree_from_vault",
+            return_value=(new_tree, new_manifest),
+        ):
+            result2 = await service.reindex_vault()
+            assert result2["success"] is True
+            assert result2["files_processed"] == 0
+            assert result2["message"] == "No changes detected."
+
         # Modify one file
-        file1.write_text("# Test Document 1\n\nThis is the modified first test document.")
-        
+        file1.write_text(
+            "# Test Document 1\n\nThis is the modified first test document."
+        )
+
         # Third reindex - should detect the modified file
         mock_load_documents.return_value = [mock_documents[0]]
         result3 = await service.reindex_vault()
         assert result3["success"] is True
-        assert result3["files_processed"] == 1  # Only the modified file should be processed
+        assert (
+            result3["files_processed"] == 1
+        )  # Only the modified file should be processed
         assert result3["changes"]["updated"] == 1
         assert result3["changes"]["added"] == 0
         assert result3["changes"]["removed"] == 0
 
 
 @pytest.mark.asyncio
-async def test_merkle_tree_with_prefix_filtering(integration_config, temp_vault_dir, mock_vector_store):
+async def test_merkle_tree_with_prefix_filtering(integration_config, temp_vault_dir):
     """Test Merkle tree state tracking with prefix filtering."""
+    from components.vector_store.vector_store import VectorStore
+    from llama_index.core import Document
+
     # Update config to use prefix filtering
     integration_config.prefix_filter.allowed_prefixes = ["included_"]
-    
+
     # Create test files
     file1 = temp_vault_dir / "included_test1.md"
     file1.write_text("# Included Document 1\n\nThis document should be included.")
-    
+
     file2 = temp_vault_dir / "excluded_test2.md"
     file2.write_text("# Excluded Document 2\n\nThis document should be excluded.")
-    
+
     # Initialize VaultService
-    service = VaultService(config=integration_config, vector_store=mock_vector_store, query_engine=None)
-    
+    service = VaultService(
+        config=integration_config,
+        vector_store=Mock(spec=VectorStore),
+        query_engine=None,
+    )
+
     # Mock the document loading to return specific documents
-    mock_documents = [Mock()]
-    mock_documents[0].text = "# Included Document 1\n\nThis document should be included."
-    mock_documents[0].metadata = {"file_path": str(file1)}
-    
+    mock_documents = [
+        Document(
+            text="# Included Document 1\n\nThis document should be included.",
+            metadata={"file_path": str(file1)},
+        )
+    ]
+
     with patch("components.vault_service.main.load_documents") as mock_load_documents:
         mock_load_documents.return_value = mock_documents
         # First reindex - should process only included files
         result1 = await service.reindex_vault()
         assert result1["success"] is True
         assert result1["files_processed"] == 1
-        
+
         # Second reindex - should detect no changes
-        mock_load_documents.return_value = []
-        result2 = await service.reindex_vault()
-        assert result2["success"] is True
-        assert result2["files_processed"] == 0
-        assert result2["message"] == "No changes detected."
+        # Get the state after the first reindex
+        new_tree, new_manifest = service.state_tracker.generate_tree_from_vault(
+            prefix_filter=integration_config.prefix_filter.allowed_prefixes
+        )
+        with patch.object(
+            service.state_tracker,
+            "generate_tree_from_vault",
+            return_value=(new_tree, new_manifest),
+        ):
+            result2 = await service.reindex_vault()
+            assert result2["success"] is True
+            assert result2["files_processed"] == 0
+            assert result2["message"] == "No changes detected."

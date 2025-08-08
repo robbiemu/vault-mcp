@@ -1,12 +1,10 @@
 """Tests for the StateTracker class."""
 
 import json
-import os
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
-import pytest
 from shared.state_tracker import StateTracker
 
 
@@ -30,7 +28,7 @@ class TestStateTracker:
 
             tracker = StateTracker(vault_path=tmpdir)
             content_hash = tracker._hash_file_content(test_file)
-            
+
             # Verify it's a valid SHA256 hash
             assert len(content_hash) == 64
             assert all(c in "0123456789abcdef" for c in content_hash)
@@ -39,28 +37,28 @@ class TestStateTracker:
         """Test generate_tree_from_vault method."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
-            
+
             # Create test files
             file1 = tmpdir_path / "file1.md"
             file1.write_text("Content of file 1")
-            
+
             file2 = tmpdir_path / "file2.md"
             file2.write_text("Content of file 2")
-            
+
             sub_dir = tmpdir_path / "subdir"
             sub_dir.mkdir()
             file3 = sub_dir / "file3.md"
             file3.write_text("Content of file 3")
-            
+
             tracker = StateTracker(vault_path=tmpdir)
             tree, manifest = tracker.generate_tree_from_vault()
-            
+
             # Verify manifest contains all files
             assert len(manifest) == 3
             assert str(file1) in manifest
             assert str(file2) in manifest
             assert str(file3) in manifest
-            
+
             # Verify tree has the right structure (3 leaf nodes)
             assert len(tree) == 3
 
@@ -68,22 +66,24 @@ class TestStateTracker:
         """Test generate_tree_from_vault method with prefix filter."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
-            
+
             # Create test files
             file1 = tmpdir_path / "include_file1.md"
             file1.write_text("Content of file 1")
-            
+
             file2 = tmpdir_path / "exclude_file2.md"
             file2.write_text("Content of file 2")
-            
+
             sub_dir = tmpdir_path / "subdir"
             sub_dir.mkdir()
             file3 = sub_dir / "include_file3.md"
             file3.write_text("Content of file 3")
-            
+
             tracker = StateTracker(vault_path=tmpdir)
-            tree, manifest = tracker.generate_tree_from_vault(prefix_filter=["include_"])
-            
+            tree, manifest = tracker.generate_tree_from_vault(
+                prefix_filter=["include_"]
+            )
+
             # Verify manifest only contains files with the prefix
             assert len(manifest) == 2
             assert str(file1) in manifest
@@ -95,23 +95,20 @@ class TestStateTracker:
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = Path(tmpdir) / "state.json"
             tracker = StateTracker(vault_path=tmpdir, state_file_path=str(state_file))
-            
+
             # Create a mock tree with a root hash
             mock_tree = Mock()
             mock_tree.root.hexdigest.return_value = "test_root_hash_123"
-            
-            manifest = {
-                "/path/to/file1.md": "hash1",
-                "/path/to/file2.md": "hash2"
-            }
-            
+
+            manifest = {"/path/to/file1.md": "hash1", "/path/to/file2.md": "hash2"}
+
             tracker.save_state(mock_tree, manifest)
-            
+
             # Verify state was saved correctly
             assert state_file.exists()
-            with open(state_file, 'r') as f:
+            with open(state_file, "r") as f:
                 saved_state = json.load(f)
-            
+
             assert saved_state["root_hash"] == "test_root_hash_123"
             assert saved_state["manifest"] == manifest
 
@@ -120,21 +117,21 @@ class TestStateTracker:
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = Path(tmpdir) / "state.json"
             tracker = StateTracker(vault_path=tmpdir, state_file_path=str(state_file))
-            
+
             # Create a test state file
             test_state = {
                 "root_hash": "test_root_hash_123",
                 "manifest": {
                     "/path/to/file1.md": "hash1",
-                    "/path/to/file2.md": "hash2"
-                }
+                    "/path/to/file2.md": "hash2",
+                },
             }
-            
-            with open(state_file, 'w') as f:
+
+            with open(state_file, "w") as f:
                 json.dump(test_state, f)
-            
+
             root_hash, manifest = tracker.load_state()
-            
+
             assert root_hash == "test_root_hash_123"
             assert manifest == test_state["manifest"]
 
@@ -143,9 +140,9 @@ class TestStateTracker:
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = Path(tmpdir) / "nonexistent.json"
             tracker = StateTracker(vault_path=tmpdir, state_file_path=str(state_file))
-            
+
             root_hash, manifest = tracker.load_state()
-            
+
             assert root_hash is None
             assert manifest == {}
 
@@ -154,13 +151,13 @@ class TestStateTracker:
         with tempfile.TemporaryDirectory() as tmpdir:
             state_file = Path(tmpdir) / "corrupted.json"
             tracker = StateTracker(vault_path=tmpdir, state_file_path=str(state_file))
-            
+
             # Create a corrupted state file
-            with open(state_file, 'w') as f:
+            with open(state_file, "w") as f:
                 f.write("invalid json content")
-            
+
             root_hash, manifest = tracker.load_state()
-            
+
             assert root_hash is None
             assert manifest == {}
 
@@ -168,27 +165,27 @@ class TestStateTracker:
         """Test compare_states method."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tracker = StateTracker(vault_path=tmpdir)
-            
+
             old_manifest = {
                 "/path/to/file1.md": "hash1",  # unchanged
                 "/path/to/file2.md": "hash2_old",  # modified
                 "/path/to/file3.md": "hash3",  # removed
             }
-            
+
             new_manifest = {
                 "/path/to/file1.md": "hash1",  # unchanged
                 "/path/to/file2.md": "hash2_new",  # modified
                 "/path/to/file4.md": "hash4",  # added
             }
-            
+
             changes = tracker.compare_states(old_manifest, new_manifest)
-            
+
             # Verify changes are correctly identified
             assert len(changes["added"]) == 1
             assert "/path/to/file4.md" in changes["added"]
-            
+
             assert len(changes["updated"]) == 1
             assert "/path/to/file2.md" in changes["updated"]
-            
+
             assert len(changes["removed"]) == 1
             assert "/path/to/file3.md" in changes["removed"]

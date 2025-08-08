@@ -3,6 +3,8 @@
 # This script installs all project dependencies, including dev dependencies,
 # ensuring that CUDA-related packages are pinned to their CPU-only versions.
 
+# Useful for space-constrainted environments that will detect nvidia.
+
 # Exit immediately if a command exits with a non-zero status.
 set -e
 

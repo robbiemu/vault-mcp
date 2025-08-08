@@ -219,11 +219,11 @@ The server employs a sophisticated, multi-stage pipeline for document ingestion,
 
 ### 1. Document Ingestion & Processing
 
-1. **File Watching & Filter-Then-Load**: Continuously monitors your document sources and applies prefix filtering before loading
-2. **Multi-Source Document Loading**: Intelligently reads from Standard Markdown, Obsidian vaults, or Joplin notebooks
-3. **Two-Stage Node Parsing**: Structural parsing preserves document meaning, then size-based splitting creates optimal chunks
-4. **Quality Scoring**: Content-based heuristics filter out low-quality chunks
-5. **Pluggable Embedding & Storage**: Flexible embedding system stores vectors in ChromaDB
+1.  **File Watching & Filter-Then-Load**: Continuously monitors your document sources and applies prefix filtering *before* loading, ensuring efficient processing of large vaults.
+2.  **Multi-Source Document Loading**: Intelligently reads from Standard Markdown, Obsidian vaults, or Joplin notebooks
+3.  **Two-Stage Node Parsing**: Structural parsing preserves document meaning, then size-based splitting creates optimal chunks
+4.  **Quality Scoring**: Content-based heuristics filter out low-quality chunks
+5.  **Pluggable Embedding & Storage**: Flexible embedding system stores vectors in ChromaDB
 
 ### 2. Configurable Retrieval & Query Processing
 

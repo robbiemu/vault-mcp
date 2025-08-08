@@ -1,7 +1,7 @@
 """Document loader factory for creating appropriate readers based on configuration."""
 
 import logging
-from typing import List
+from typing import List, Optional
 
 from llama_index.core import SimpleDirectoryReader
 from llama_index.core.readers.base import BaseReader
@@ -75,10 +75,9 @@ def create_reader(config: Config) -> BaseReader:
         )
 
 
-from typing import Optional
-
-
-def load_documents(config: Config, files_to_process: Optional[List[str]] = None) -> List[Document]:
+def load_documents(
+    config: Config, files_to_process: Optional[List[str]] = None
+) -> List[Document]:
     """
     Load documents using the appropriate reader.
 
@@ -89,7 +88,7 @@ def load_documents(config: Config, files_to_process: Optional[List[str]] = None)
         # If a specific list of files is provided, load them directly.
         if files_to_process:
             logger.info(f"Loading {len(files_to_process)} specific files.")
-            reader = SimpleDirectoryReader(input_files=files_to_process)
+            reader: BaseReader = SimpleDirectoryReader(input_files=files_to_process)
             documents = reader.load_data()
             logger.debug(f"Successfully loaded {len(documents)} documents.")
             return documents
@@ -123,12 +122,14 @@ def load_documents(config: Config, files_to_process: Optional[List[str]] = None)
 
                 if not files_to_load:
                     logger.info(
-                        f"No files matching the prefix filter were found in {vault_path}"
+                        "No files matching the prefix filter were found "
+                        f"in {vault_path}"
                     )
                     return []
 
                 logger.debug(
-                    f"Found {len(files_to_load)} files to load after applying prefix filter."
+                    f"Found {len(files_to_load)} files to load after applying "
+                    "prefix filter."
                 )
 
                 # 2. Choose the appropriate reader based on type

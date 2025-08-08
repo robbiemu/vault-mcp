@@ -13,6 +13,8 @@ from shared.config import (
 
 from ..main import create_app
 
+# components/api_app/tests/test_main.py
+
 
 @pytest.fixture
 def test_config(tmp_path):
@@ -21,6 +23,8 @@ def test_config(tmp_path):
         paths=PathsConfig(
             vault_dir=str(tmp_path),
             database_dir=str(tmp_path / "test_db"),
+            # --- FIX: Add data_dir to use the temporary path ---
+            data_dir=str(tmp_path / "data"),
             type="Standard",
         ),
         indexing=IndexingConfig(

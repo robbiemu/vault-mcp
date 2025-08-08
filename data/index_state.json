@@ -1,7 +1,0 @@
-{
-    "root_hash": "f4caebd552ed50cbe2da23e7e077867ba95e4208f0656109f3587020d83175e5",
-    "manifest": {
-        "/tmp/pytest-of-jules/pytest-10/test_reindex_endpoint0/dummy.md": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        "/tmp/pytest-of-jules/pytest-10/test_reindex_endpoint0/test_db/chroma.sqlite3": "d396e794a699b73d238c12a2184f83361c27c1fea1b7b3c9a5e1845866b593cc"
-    }
-}

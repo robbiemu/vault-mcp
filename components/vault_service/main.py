@@ -11,9 +11,8 @@ Responsibilities:
 """
 
 import logging
-from typing import Any, Dict, List
-
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from components.document_processing import (
     ChunkQualityScorer,
@@ -35,7 +34,13 @@ logger = logging.getLogger(__name__)
 class VaultService:
     """The central service for all vault-related business logic."""
 
-    def __init__(self, config: Config, vector_store: VectorStore, query_engine: Any):
+    def __init__(
+        self,
+        config: Config,
+        vector_store: VectorStore,
+        query_engine: Optional[Any] = None,
+        state_tracker: Optional[StateTracker] = None,
+    ):
         """
         Initializes the VaultService with its required dependencies.
 
@@ -47,9 +52,9 @@ class VaultService:
         self.config = config
         self.vector_store = vector_store
         self.query_engine = query_engine
-        self.state_tracker = StateTracker(
+        self.state_tracker = state_tracker or StateTracker(
             vault_path=str(self.config.paths.vault_dir),
-            state_file_path=str(Path(self.config.paths.data_dir) / "index_state.json")
+            state_file_path=str(Path(self.config.paths.data_dir) / "index_state.json"),
         )
         # The node parser is needed for re-indexing logic
         self.node_parser = MarkdownNodeParser.from_defaults()
@@ -163,7 +168,8 @@ class VaultService:
             from llama_index.core import Document
 
             node_documents = [
-                Document(text=node.get_content(), metadata=node.metadata) for node in initial_nodes
+                Document(text=node.get_content(), metadata=node.metadata)
+                for node in initial_nodes
             ]
             final_nodes = size_splitter.get_nodes_from_documents(node_documents)
 
@@ -197,19 +203,33 @@ class VaultService:
         Performs an intelligent re-indexing of the vault by comparing the current
         state against the last known state using a Merkle tree.
         """
-        logger.info("Starting intelligent re-indexing using Merkle tree.")
+        logger.debug("--- Starting intelligent re-indexing ---")
 
         # 1. Generate the Merkle tree for the current vault state
+        logger.debug("Step 1: Generating new Merkle tree from vault state.")
         new_tree, new_manifest = self.state_tracker.generate_tree_from_vault(
             prefix_filter=self.config.prefix_filter.allowed_prefixes
         )
         new_root_hash_bytes = new_tree.get_state() if new_tree.get_size() > 0 else None
         new_root_hash = new_root_hash_bytes.hex() if new_root_hash_bytes else None
+        logger.debug(
+            f"Generated new state: size={new_tree.get_size()}, "
+            f"root_hash={new_root_hash}, "
+            f"manifest_keys={list(new_manifest.keys())[:5]}..."
+        )
 
         # 2. Load the persisted state from the last index
+        logger.debug("Step 2: Loading old state from disk.")
         old_root_hash, old_manifest = self.state_tracker.load_state()
+        logger.debug(
+            f"Loaded old state: root_hash={old_root_hash}, "
+            f"manifest_keys={list(old_manifest.keys())[:5]}..."
+        )
 
         # 3. Compare root hashes. If they match, no changes.
+        logger.debug(
+            f"Step 3: Comparing hashes. New: '{new_root_hash}', Old: '{old_root_hash}'"
+        )
         if new_root_hash == old_root_hash:
             logger.info("No changes detected in the vault. Re-indexing not required.")
             return {
@@ -219,27 +239,34 @@ class VaultService:
             }
 
         # 4. If hashes differ, calculate the diff
+        logger.debug("Step 4: Hashes differ. Calculating state comparison.")
         changes = self.state_tracker.compare_states(old_manifest, new_manifest)
+        logger.debug(f"Changes from compare_states: {changes}")
         added_files = changes["added"]
         updated_files = changes["updated"]
         removed_files = changes["removed"]
 
-        logger.info(f"Detected changes: {len(added_files)} added, {len(updated_files)} updated, {len(removed_files)} removed.")
-
         # 5. Handle removals and updates (by removing old versions first)
         files_to_remove = removed_files + updated_files
         if files_to_remove:
-            logger.info(f"Removing {len(files_to_remove)} files from the index.")
+            logger.debug(f"Step 5: Removing {len(files_to_remove)} files from index.")
             for file_path in files_to_remove:
                 self.vector_store.remove_file_chunks(file_path)
+        else:
+            logger.debug("Step 5: No files to remove.")
 
         # 6. Handle additions and updates by processing only the changed files
         files_to_process = added_files + updated_files
+        logger.debug(f"Step 6: Files to process: {files_to_process}")
+
         if files_to_process:
-            logger.info(f"Processing {len(files_to_process)} added/updated files for indexing.")
+            logger.debug(f"Processing {len(files_to_process)} changed files.")
             try:
                 # Use the existing document loading and processing pipeline
-                documents = load_documents(self.config, files_to_process=files_to_process)
+                documents = load_documents(
+                    self.config, files_to_process=files_to_process
+                )
+                logger.debug(f"load_documents returned {len(documents)} documents")
                 if documents:
                     # Two-stage parsing: structural then size-based
                     initial_nodes = self.node_parser.get_nodes_from_documents(documents)
@@ -247,15 +274,22 @@ class VaultService:
                         chunk_size=self.config.indexing.chunk_size,
                         chunk_overlap=self.config.indexing.chunk_overlap,
                     )
-                    # Convert nodes to documents for the size splitter, preserving metadata
+                    # Convert nodes to documents for the size splitter, preserving
+                    #  metadata
                     from llama_index.core import Document
+
                     node_documents = [
-                        Document(text=node.get_content(), metadata=node.metadata) for node in initial_nodes
+                        Document(text=node.get_content(), metadata=node.metadata)
+                        for node in initial_nodes
                     ]
                     final_nodes = size_splitter.get_nodes_from_documents(node_documents)
+                    logger.debug(
+                        f"Created {len(final_nodes)} final nodes after splitting."
+                    )
 
                     quality_scorer = ChunkQualityScorer()
                     chunks = convert_nodes_to_chunks(final_nodes, quality_scorer)
+                    logger.debug(f"Converted nodes to {len(chunks)} chunks.")
 
                     if self.config.indexing.enable_quality_filter:
                         quality_chunks = [
@@ -263,26 +297,41 @@ class VaultService:
                             for c in chunks
                             if c["score"] >= self.config.indexing.quality_threshold
                         ]
+                        logger.debug(
+                            f"Filtered down to {len(quality_chunks)} high-quality "
+                            "chunks."
+                        )
                     else:
                         quality_chunks = chunks
 
                     if quality_chunks:
                         self.vector_store.add_chunks(quality_chunks)
-                        logger.info(f"Successfully indexed {len(quality_chunks)} chunks from changed files.")
+                        logger.info(
+                            f"Successfully indexed {len(quality_chunks)} chunks "
+                            "from changed files."
+                        )
 
             except Exception as e:
-                logger.error(f"Error processing changed files: {e}", exc_info=True)
-                # In case of an error, we should not save the new state to allow for a retry.
-                # We return an error response.
+                logger.error(
+                    f"ERROR in Step 6 - Error processing changed files: {e}",
+                    exc_info=True,
+                )
                 return {
                     "success": False,
-                    "message": "An error occurred while processing file changes. The state has not been updated.",
+                    "message": (
+                        "An error occurred while processing file changes. "
+                        "The state has not been updated."
+                    ),
                     "error": str(e),
                 }
+        else:
+            logger.debug("No files to process — skipping document loading.")
 
         # 7. Save the new state
+        logger.debug("Step 7: Saving new state.")
         self.state_tracker.save_state(new_tree, new_manifest)
 
+        logger.info("--- Re-indexing finished successfully ---")
         return {
             "success": True,
             "message": "Re-indexing completed based on detected changes.",
@@ -291,5 +340,5 @@ class VaultService:
                 "added": len(added_files),
                 "updated": len(updated_files),
                 "removed": len(removed_files),
-            }
+            },
         }

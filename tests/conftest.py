@@ -1,7 +1,9 @@
 """Test fixtures and configuration."""
 
 import contextlib
+import logging  # Added
 import shutil
+import sys  # Added
 import tempfile
 from pathlib import Path
 from typing import Generator
@@ -20,6 +22,19 @@ from shared.config import (
     ServerConfig,
     WatcherConfig,
 )
+
+
+# --- This function enables logging visibility during tests ---
+def pytest_configure(config):
+    """Configure logging to be visible for all tests."""
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(levelname)s:%(name)s:%(message)s",
+        stream=sys.stdout,
+    )
+
+
+# -----------------------------------------------------------
 
 
 @pytest.fixture

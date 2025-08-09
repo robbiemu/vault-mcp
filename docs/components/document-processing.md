@@ -44,9 +44,6 @@ After documents are loaded, they undergo a two-stage parsing process to convert 
   - `read_full_document(file_path: str) -> str` - Read entire document content
   - `get_enclosing_sections(file_path: str, start_char_idx: int, end_char_idx: int) -> str` - Extract sections containing character range
 
-- **`FullDocumentRetrievalTool`** - Tool wrapper for full document retrieval
-- **`SectionRetrievalTool`** - Tool wrapper for section-based retrieval
-
 ## Dependencies and Integration Points
 
 ### Internal Dependencies

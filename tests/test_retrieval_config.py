@@ -2,7 +2,7 @@
 
 import pytest
 from pydantic import ValidationError
-from vault_mcp.config import Config, GenerationModelConfig, PathsConfig, RetrievalConfig
+from shared.config import Config, GenerationModelConfig, PathsConfig, RetrievalConfig
 
 
 def test_agentic_mode_requires_generation_model():

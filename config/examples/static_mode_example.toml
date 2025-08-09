@@ -26,7 +26,8 @@ debounce_seconds = 2
 
 [server]
 host = "127.0.0.1"
-port = 8000
+api_port = 8000
+mcp_port = 8081
 
 [embedding_model]
 provider = "sentence_transformers"

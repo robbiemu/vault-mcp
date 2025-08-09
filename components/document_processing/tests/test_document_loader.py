@@ -10,7 +10,7 @@ from components.document_processing import (
     create_reader,
     load_documents,
 )
-from vault_mcp.config import Config, JoplinConfig, PathsConfig, PrefixFilterConfig
+from shared.config import Config, JoplinConfig, PathsConfig, PrefixFilterConfig
 
 
 class TestDocumentLoader:

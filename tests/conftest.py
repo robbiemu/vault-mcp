@@ -1,15 +1,18 @@
 """Test fixtures and configuration."""
 
 import contextlib
+import logging  # Added
 import shutil
+import sys  # Added
 import tempfile
 from pathlib import Path
 from typing import Generator
+from unittest.mock import Mock, patch
 
 import pytest
 from components.vector_store.vector_store import VectorStore
 from llama_index.core.node_parser import MarkdownNodeParser
-from vault_mcp.config import (
+from shared.config import (
     Config,
     EmbeddingModelConfig,
     IndexingConfig,
@@ -19,6 +22,19 @@ from vault_mcp.config import (
     ServerConfig,
     WatcherConfig,
 )
+
+
+# --- This function enables logging visibility during tests ---
+def pytest_configure(config):
+    """Configure logging to be visible for all tests."""
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(levelname)s:%(name)s:%(message)s",
+        stream=sys.stdout,
+    )
+
+
+# -----------------------------------------------------------
 
 
 @pytest.fixture
@@ -86,7 +102,7 @@ def test_config(temp_vault_dir: Path) -> Config:
             chunk_size=256, chunk_overlap=32, quality_threshold=0.5
         ),
         watcher=WatcherConfig(enabled=False),  # Disable for tests
-        server=ServerConfig(host="127.0.0.1", port=8000),
+        server=ServerConfig(host="127.0.0.1", api_port=8000, mcp_port=8001),
         joplin_config=JoplinConfig(),
     )
 
@@ -106,18 +122,27 @@ def test_embedding_config() -> EmbeddingModelConfig:
 
 
 @pytest.fixture
-def temp_vector_store(
-    tmp_path: Path, test_embedding_config: EmbeddingModelConfig
+def mock_vector_store(
+    temp_vault_dir: Path,
 ) -> Generator[VectorStore, None, None]:
-    """Create a temporary vector store for testing."""
-    vector_store = VectorStore(
-        embedding_config=test_embedding_config,
-        persist_directory=str(tmp_path / "test_chroma"),
-        collection_name="test_vault_docs",
-    )
-    try:
-        yield vector_store
-    finally:
-        # Clean up
-        with contextlib.suppress(Exception):
-            vector_store.clear_all()
+    """Create a temporary vector store with a mock embedding model."""
+    with patch(
+        "components.vector_store.vector_store.create_embedding_model"
+    ) as mock_create_embedding:
+        mock_embedding = Mock()
+        mock_embedding.encode.side_effect = lambda chunks: [[0.1] * 768 for _ in chunks]
+        mock_create_embedding.return_value = mock_embedding
+
+        vector_store = VectorStore(
+            embedding_config=EmbeddingModelConfig(
+                provider="sentence_transformers", model_name="all-MiniLM-L6-v2"
+            ),
+            persist_directory=str(temp_vault_dir / "test_chroma"),
+            collection_name="test_vault_docs",
+        )
+        try:
+            yield vector_store
+        finally:
+            # Clean up
+            with contextlib.suppress(Exception):
+                vector_store.clear_all()

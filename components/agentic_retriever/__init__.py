@@ -9,7 +9,7 @@ Key Classes:
 - ChunkRewriterPostprocessor: Orchestrates concurrent chunk rewriting
 - create_agentic_query_engine: Factory function for complete query engine setup
 
-The ChunkRewriteAgent now uses FullDocumentRetrievalTool and SectionRetrievalTool
+The ChunkRewriteAgent now uses a set of shared, file-aware tools.
 for more targeted and comprehensive document exploration.
 """
 

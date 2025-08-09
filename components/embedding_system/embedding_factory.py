@@ -4,7 +4,7 @@ from typing import Any, List, Protocol, cast
 
 from llama_index.core.embeddings import BaseEmbedding
 from pydantic import Field
-from vault_mcp.config import EmbeddingModelConfig
+from shared.config import EmbeddingModelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ class OpenAIEndpointEmbedding(BaseEmbedding):
 
             client = OpenAI(api_key=api_key, base_url=endpoint_url)
             model_name_attr = model_name
-            logger.info(
+            logger.debug(
                 f"Initialized OpenAI-compatible client for {model_name} "
                 f"at {endpoint_url}"
             )

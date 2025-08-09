@@ -16,7 +16,7 @@ The retrieval post-processing system is designed to:
 
 ### Key Classes & Concepts
 
-- **`ChunkRewriterPostprocessor`**: This post-processor is used in `agentic` mode. It coordinates concurrent chunk rewriting operations, leveraging LLMs and agents to refine retrieved content for improved relevance and detail.
+- **`ChunkRewriterPostprocessor`**: This post-processor is used in `agentic` mode. It orchestrates the **sequential** rewriting of each retrieved chunk, providing the other chunks as context for each operation.
 
 - **`StaticContextPostprocessor`**: This post-processor is used in `static` mode. It expands retrieved chunks to include their full contextual section (e.g., the entire paragraph or the section defined by a heading), providing a direct and un-rewritten context.
 
@@ -32,8 +32,7 @@ This mode is designed for high-quality, AI-enhanced responses, suitable for comp
 
 1.  **Initial Retrieval**: The query engine retrieves relevant document chunks from the vector store based on semantic similarity.
 2.  **Chunk Rewriting**: The `ChunkRewriterPostprocessor` takes these retrieved chunks and, for each chunk, initiates an AI agent (e.g., `ChunkRewriteAgent`). This agent interacts with an LLM to rewrite or expand the chunk, making it more directly relevant to the query and potentially incorporating additional context.
-3.  **Contextual Integration**: The rewritten chunks are then integrated to form a comprehensive context for generating the final answer.
-4.  **Final Generation**: An LLM uses this refined context to generate a detailed and accurate response to the user's query.
+3.  **Direct Presentation**: The rewritten chunks are returned directly as the source nodes in the response. The system is configured **not** to perform a final synthesis step that would combine them into a single answer.
 
 ### 2. Static Mode Workflow
 

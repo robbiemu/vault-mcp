@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import toml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,10 @@ class PathsConfig(BaseModel):
     database_dir: str = Field(
         default="./chroma_db",
         description="Directory to store the ChromaDB vector database",
+    )
+    data_dir: str = Field(
+        default="./data",
+        description="Directory to store application data, such as the index state file",
     )
     type: str = Field(
         default="Standard",
@@ -58,7 +62,8 @@ class ServerConfig(BaseModel):
     """Configuration for the server."""
 
     host: str = Field(default="127.0.0.1", description="Server host")
-    port: int = Field(default=8000, description="Server port")
+    api_port: int = Field(default=8000, description="API Server port")
+    mcp_port: int = Field(default=8000, description="MCP Server port")
     default_query_limit: int = Field(
         default=5, description="Default number of results returned for queries"
     )
@@ -125,6 +130,8 @@ class JoplinConfig(BaseModel):
 
 class Config(BaseModel):
     """Main configuration model."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     paths: PathsConfig
     prefix_filter: PrefixFilterConfig = Field(default_factory=PrefixFilterConfig)

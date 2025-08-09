@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 import toml
-from vault_mcp.config import Config, PathsConfig, PrefixFilterConfig, load_config
+from shared.config import Config, PathsConfig, PrefixFilterConfig, load_config
 
 
 def test_config_creation():
@@ -27,7 +27,7 @@ def test_config_load_from_file(tmp_path: Path):
         "prefix_filter": {"allowed_prefixes": ["Resource Balance Game"]},
         "indexing": {"chunk_size": 1024, "quality_threshold": 0.8},
         "watcher": {"enabled": False},
-        "server": {"port": 9000},
+        "server": {"api_port": 9000, "mcp_port": 9000},
     }
 
     with open(config_file, "w") as f:
@@ -40,7 +40,8 @@ def test_config_load_from_file(tmp_path: Path):
     assert config.indexing.chunk_size == 1024
     assert config.indexing.quality_threshold == 0.8
     assert config.watcher.enabled is False
-    assert config.server.port == 9000
+    assert config.server.api_port == 9000
+    assert config.server.mcp_port == 9000
 
 
 def test_config_file_not_found():

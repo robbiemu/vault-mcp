@@ -1,0 +1,381 @@
+"""
+This service encapsulates all the business logic for interacting with the vault.
+It is completely decoupled from any web framework (like FastAPI) and serves as the
+single source of truth for all vault operations.
+
+Responsibilities:
+- Querying for document chunks.
+- Retrieving full document content.
+- Listing indexed files.
+- Triggering and managing the re-indexing process.
+"""
+
+import logging
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from components.document_processing import (
+    ChunkQualityScorer,
+    DocumentLoaderError,
+    convert_nodes_to_chunks,
+    load_documents,
+)
+from components.vector_store.vector_store import VectorStore
+from llama_index.core.node_parser import MarkdownNodeParser, SentenceSplitter
+from llama_index.core.schema import MetadataMode
+from shared.config import Config
+from shared.state_tracker import StateTracker
+
+from .models import ChunkMetadata
+
+logger = logging.getLogger(__name__)
+
+
+class VaultService:
+    """The central service for all vault-related business logic."""
+
+    def __init__(
+        self,
+        config: Config,
+        vector_store: VectorStore,
+        query_engine: Optional[Any] = None,
+        state_tracker: Optional[StateTracker] = None,
+    ):
+        """
+        Initializes the VaultService with its required dependencies.
+
+        Args:
+            config: The application's configuration object.
+            vector_store: The VectorStore instance for database interactions.
+            query_engine: The LlamaIndex query engine for RAG operations.
+        """
+        self.config = config
+        self.vector_store = vector_store
+        self.query_engine = query_engine
+        self.state_tracker = state_tracker or StateTracker(
+            vault_path=str(self.config.paths.vault_dir),
+            state_file_path=str(Path(self.config.paths.data_dir) / "index_state.json"),
+        )
+        # The node parser is needed for re-indexing logic
+        self.node_parser = MarkdownNodeParser.from_defaults()
+
+    def list_all_files(self) -> List[str]:
+        """
+        Retrieves a list of all file paths currently indexed in the vector store.
+
+        Returns:
+            A sorted list of unique file paths.
+        """
+        return self.vector_store.get_all_file_paths()
+
+    def get_document_content(self, file_path: str) -> str:
+        """
+        Retrieves the full, raw content of a specific document from disk.
+
+        Args:
+            file_path: The absolute path to the document file.
+
+        Returns:
+            The raw string content of the file.
+
+        Raises:
+            FileNotFoundError: If the file is not found in the index or on disk.
+        """
+        if file_path not in self.vector_store.get_all_file_paths():
+            logger.warning(f"Attempted to access non-indexed file: {file_path}")
+            raise FileNotFoundError(f"Document not found in index: {file_path}")
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return content
+
+    async def search_chunks(self, query: str, limit: int | None) -> List[ChunkMetadata]:
+        """
+        Performs a semantic search for relevant document chunks.
+
+        This method uses the advanced LlamaIndex query engine if available,
+        and gracefully falls back to a basic vector store search if not.
+
+        Args:
+            query: The user's search query string.
+            limit: The maximum number of results to return.
+
+        Returns:
+            A list of ChunkMetadata objects, ranked by relevance.
+        """
+        final_limit = (
+            limit if limit is not None else self.config.server.default_query_limit
+        )
+
+        if not self.query_engine:
+            logger.warning("Query engine not available, falling back to basic search.")
+            return self.vector_store.search(
+                query,
+                limit=final_limit,
+                quality_threshold=self.config.indexing.quality_threshold,
+            )
+
+        try:
+            logger.info(f"Performing RAG query for: '{query}'")
+            # Use the asynchronous 'aquery' method instead of 'query'
+            response = await self.query_engine.aquery(query)
+
+            sources = []
+            if hasattr(response, "source_nodes"):
+                for node in response.source_nodes[:final_limit]:
+                    # Handle None values for character indices
+                    start_idx = node.node.metadata.get("start_char_idx", 0)
+                    end_idx = node.node.metadata.get("end_char_idx", 0)
+
+                    chunk_metadata = ChunkMetadata(
+                        text=node.node.get_content(metadata_mode=MetadataMode.NONE),
+                        file_path=node.node.metadata.get("file_path", "unknown"),
+                        chunk_id=node.node.id_,
+                        score=float(node.score or 0.0),
+                        start_char_idx=int(start_idx) if start_idx is not None else 0,
+                        end_char_idx=int(end_idx) if end_idx is not None else 0,
+                        original_text=node.node.metadata.get("original_text"),
+                    )
+                    sources.append(chunk_metadata)
+            return sources
+
+        except Exception as e:
+            logger.error(
+                f"Error during RAG query, falling back to basic search: {e}",
+                exc_info=True,
+            )
+            return self.vector_store.search(
+                query,
+                limit=final_limit,
+                quality_threshold=self.config.indexing.quality_threshold,
+            )
+
+    async def _perform_indexing(self) -> int:
+        """
+        Contains the core logic for processing and indexing documents from the vault.
+        This is a helper method called by reindex_vault.
+        """
+        logger.info("Starting document ingestion and indexing process...")
+        try:
+            documents = load_documents(self.config)
+            if not documents:
+                logger.info("No documents found to index.")
+                return 0
+
+            # Two-stage parsing: structural then size-based
+            initial_nodes = self.node_parser.get_nodes_from_documents(documents)
+            size_splitter = SentenceSplitter(
+                chunk_size=self.config.indexing.chunk_size,
+                chunk_overlap=self.config.indexing.chunk_overlap,
+            )
+            # Convert nodes to documents for the size splitter, preserving metadata
+            from llama_index.core import Document
+
+            node_documents = [
+                Document(text=node.get_content(), metadata=node.metadata)
+                for node in initial_nodes
+            ]
+            final_nodes = size_splitter.get_nodes_from_documents(node_documents)
+
+            quality_scorer = ChunkQualityScorer()
+            chunks = convert_nodes_to_chunks(final_nodes, quality_scorer)
+
+            if self.config.indexing.enable_quality_filter:
+                quality_chunks = [
+                    c
+                    for c in chunks
+                    if c["score"] >= self.config.indexing.quality_threshold
+                ]
+            else:
+                quality_chunks = chunks
+
+            if quality_chunks:
+                self.vector_store.add_chunks(quality_chunks)
+                logger.info(f"Successfully indexed {len(quality_chunks)} chunks.")
+
+            return len(self.vector_store.get_all_file_paths())
+
+        except DocumentLoaderError as e:
+            logger.error(f"Document loading failed during re-indexing: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during indexing: {e}")
+            raise
+
+    async def reindex_vault(self) -> Dict[str, Any]:
+        """
+        Performs an intelligent re-indexing of the vault by comparing the current
+        state against the last known state using a Merkle tree.
+        """
+        logger.debug("--- Starting intelligent re-indexing ---")
+
+        # 1. Generate the Merkle tree for the current vault state
+        logger.debug("Step 1: Generating new Merkle tree from vault state.")
+        new_tree, new_manifest = self.state_tracker.generate_tree_from_vault(
+            prefix_filter=self.config.prefix_filter.allowed_prefixes
+        )
+        new_root_hash_bytes = new_tree.get_state() if new_tree.get_size() > 0 else None
+        new_root_hash = new_root_hash_bytes.hex() if new_root_hash_bytes else None
+        logger.debug(
+            f"Generated new state: size={new_tree.get_size()}, "
+            f"root_hash={new_root_hash}, "
+            f"manifest_keys={list(new_manifest.keys())[:5]}..."
+        )
+
+        # 2. Load the persisted state from the last index
+        logger.debug("Step 2: Loading old state from disk.")
+        old_root_hash, old_manifest = self.state_tracker.load_state()
+        logger.debug(
+            f"Loaded old state: root_hash={old_root_hash}, "
+            f"manifest_keys={list(old_manifest.keys())[:5]}..."
+        )
+
+        # 3. Compare root hashes. If they match, no changes.
+        logger.debug(
+            f"Step 3: Comparing hashes. New: '{new_root_hash}', Old: '{old_root_hash}'"
+        )
+        if new_root_hash == old_root_hash:
+            logger.info("No changes detected in the vault. Re-indexing not required.")
+            return {
+                "success": True,
+                "message": "No changes detected.",
+                "files_processed": 0,
+            }
+
+        # 4. If hashes differ, calculate the diff
+        logger.debug("Step 4: Hashes differ. Calculating state comparison.")
+        changes = self.state_tracker.compare_states(old_manifest, new_manifest)
+        logger.debug(f"Changes from compare_states: {changes}")
+        added_files = changes["added"]
+        updated_files = changes["updated"]
+        removed_files = changes["removed"]
+
+        # 5. Handle removals and updates (by removing old versions first)
+        files_to_remove = removed_files + updated_files
+        if files_to_remove:
+            logger.debug(f"Step 5: Removing {len(files_to_remove)} files from index.")
+            for file_path in files_to_remove:
+                self.vector_store.remove_file_chunks(file_path)
+        else:
+            logger.debug("Step 5: No files to remove.")
+
+        # 6. Handle additions and updates by processing only the changed files
+        files_to_process = added_files + updated_files
+        logger.debug(f"Step 6: Files to process: {files_to_process}")
+
+        if files_to_process:
+            logger.debug(f"Processing {len(files_to_process)} changed files.")
+            try:
+                # Use the existing document loading and processing pipeline
+                documents = load_documents(
+                    self.config, files_to_process=files_to_process
+                )
+                logger.debug(f"load_documents returned {len(documents)} documents")
+                if documents:
+                    # Stage 1: Structural parsing
+                    initial_nodes = self.node_parser.get_nodes_from_documents(documents)
+
+                    # Stage 2: Size-based splitting while preserving indices
+                    # This block correctly preserves character indices across
+                    #  both stages.
+                    size_splitter = SentenceSplitter(
+                        chunk_size=self.config.indexing.chunk_size,
+                        chunk_overlap=self.config.indexing.chunk_overlap,
+                    )
+
+                    final_nodes = []
+                    from llama_index.core import Document
+
+                    for node in initial_nodes:
+                        # Get the original start index from the structurally-aware node.
+                        # This is the crucial offset we need to preserve.
+                        original_start = getattr(node, "start_char_idx", 0) or 0
+
+                        # Create a temporary Document from the node's content to feed
+                        #  to the splitter.
+                        doc = Document(text=node.get_content(), metadata=node.metadata)
+
+                        # Split this smaller document into sub-nodes.
+                        split_nodes = size_splitter.get_nodes_from_documents([doc])
+
+                        # Correct the indices of the new sub-nodes.
+                        for split_node in split_nodes:
+                            # The splitter gives indices relative to the small doc's
+                            #  content.
+                            # We add the original offset to make them relative to the
+                            # full, original file.
+                            split_start = getattr(split_node, "start_char_idx", 0) or 0
+                            split_end = getattr(split_node, "end_char_idx", 0) or 0
+
+                            setattr(split_node, "start_char_idx", original_start + split_start)
+                            setattr(split_node, "end_char_idx", original_start + split_end)
+
+                            # Also update the metadata dictionary to ensure indices are
+                            # persisted.
+                            split_node.metadata["start_char_idx"] = (
+                                getattr(split_node, "start_char_idx")
+                            )
+                            split_node.metadata["end_char_idx"] = (
+                                getattr(split_node, "end_char_idx")
+                            )
+
+                        final_nodes.extend(split_nodes)
+                    logger.debug(
+                        f"Created {len(final_nodes)} final nodes after splitting."
+                    )
+
+                    quality_scorer = ChunkQualityScorer()
+                    chunks = convert_nodes_to_chunks(final_nodes, quality_scorer)
+                    logger.debug(f"Converted nodes to {len(chunks)} chunks.")
+
+                    if self.config.indexing.enable_quality_filter:
+                        quality_chunks = [
+                            c
+                            for c in chunks
+                            if c["score"] >= self.config.indexing.quality_threshold
+                        ]
+                        logger.debug(
+                            f"Filtered down to {len(quality_chunks)} high-quality "
+                            "chunks."
+                        )
+                    else:
+                        quality_chunks = chunks
+
+                    if quality_chunks:
+                        self.vector_store.add_chunks(quality_chunks)
+                        logger.info(
+                            f"Successfully indexed {len(quality_chunks)} chunks "
+                            "from changed files."
+                        )
+
+            except Exception as e:
+                logger.error(
+                    f"ERROR in Step 6 - Error processing changed files: {e}",
+                    exc_info=True,
+                )
+                return {
+                    "success": False,
+                    "message": (
+                        "An error occurred while processing file changes. "
+                        "The state has not been updated."
+                    ),
+                    "error": str(e),
+                }
+        else:
+            logger.debug("No files to process — skipping document loading.")
+
+        # 7. Save the new state
+        logger.debug("Step 7: Saving new state.")
+        self.state_tracker.save_state(new_tree, new_manifest)
+
+        logger.info("--- Re-indexing finished successfully ---")
+        return {
+            "success": True,
+            "message": "Re-indexing completed based on detected changes.",
+            "files_processed": len(files_to_process),
+            "changes": {
+                "added": len(added_files),
+                "updated": len(updated_files),
+                "removed": len(removed_files),
+            },
+        }

@@ -6,7 +6,7 @@ from pathlib import Path
 from components.document_processing.obsidian_reader_with_filter import (
     ObsidianReaderWithFilter,
 )
-from vault_mcp.config import Config, JoplinConfig, PathsConfig, PrefixFilterConfig
+from shared.config import Config, JoplinConfig, PathsConfig, PrefixFilterConfig
 
 
 class TestObsidianReaderWithFilter:

@@ -8,7 +8,7 @@ from typing import Any, List, Optional, cast
 from llama_index.core.schema import Document
 from llama_index.readers.obsidian import ObsidianReader
 from llama_index.readers.obsidian.base import is_hardlink
-from vault_mcp.config import Config
+from shared.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +51,8 @@ class ObsidianReaderWithFilter(ObsidianReader):
         input_dir_abs = self.input_dir.resolve()
 
         # Debug logging
-        logger.info(f"Starting filtered document loading from: {self.input_dir}")
-        logger.info(f"Filter prefixes: {self.config.prefix_filter.allowed_prefixes}")
+        logger.debug(f"Starting filtered document loading from: {self.input_dir}")
+        logger.debug(f"Filter prefixes: {self.config.prefix_filter.allowed_prefixes}")
 
         processed_count = 0
         filtered_count = 0
@@ -151,7 +151,7 @@ class ObsidianReaderWithFilter(ObsidianReader):
                 doc.metadata["backlinks"] = []
 
         # Debug logging
-        logger.info(
+        logger.debug(
             (
                 f"Processed {processed_count} .md files, "
                 f"filtered out {filtered_count}, "

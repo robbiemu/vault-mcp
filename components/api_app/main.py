@@ -61,10 +61,10 @@ def create_app(service: VaultService) -> FastAPI:
         tags=["search"],
         operation_id="search_documents",
     )
-    def search(
+    async def search(
         request: QueryRequest, svc: VaultService = Depends(get_service)
     ) -> QueryResponse:
-        results = svc.search_chunks(request.query, request.limit)
+        results = await svc.search_chunks(request.query, request.limit)
         return QueryResponse(sources=results)
 
     @app.post(

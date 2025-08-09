@@ -209,7 +209,7 @@ Clean, RESTful endpoints for direct integration:
 
 Interactive documentation available at: **[http://localhost:8000/docs](http://localhost:8000/docs)**
 
-### 🤖 MCP Server (`localhost:8001`)
+### 🤖 MCP Server (`localhost:8081`)
 
 MCP-compliant endpoints using the [fastapi-mcp](https://github.com/punkpeye/fastapi-mcp) package, automatically exposing the same functionality as MCP tools and prompts for AI agents.
 
@@ -231,9 +231,7 @@ The server employs a sophisticated, multi-stage pipeline for document ingestion,
 2. **Configurable Post-Processing**: Choose between:
    - **`agentic` Mode**: AI-enhanced rewriting for comprehensive responses
    - **`static` Mode**: Fast, deterministic context expansion
-3. **Response Generation**: Final response assembly with optional RAG enhancement
-
-Of course. Based on the detailed code analysis, here is a more accurate and clearer way to rewrite that section of the documentation.
+3. **Response Generation**: The server returns the collection of processed source chunks. In `agentic` mode, these chunks are rewritten by an AI; in `static` mode, they are expanded to their full section. The system does not synthesize a final, single answer.
 
 This version explicitly distinguishes between the two scores, explains their distinct roles in the system, and clarifies what the `score` field in the API response actually represents in different scenarios.
 

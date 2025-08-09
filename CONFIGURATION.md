@@ -32,7 +32,7 @@ The server loads configuration from `config/app.toml` by default. You can either
 - `--serve-api`: Run the standard API server (default: both servers)
 - `--serve-mcp`: Run the MCP-compliant server (default: both servers)
 - `--api-port`: Port for the API server (default: 8000)
-- `--mcp-port`: Port for the MCP server (default: 8001)
+- `--mcp-port`: Port for the MCP server (default: 8081)
 - `--host`: Override the server host (default: from config)
 
 ### Configuration Overrides

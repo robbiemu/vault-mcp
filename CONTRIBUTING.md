@@ -140,7 +140,7 @@ vault-mcp/
 │   ├── file_watcher/        # Live file monitoring
 │   ├── document_processing/ # Document loading and processing
 │   ├── embedding_system/    # Pluggable embedding models
-│   └── agentic_retriever/   # Agentic retrieval and RAG
+│   └── agentic_retriever/   # Agentic retrieval and chunk rewriting
 ├── shared/                  # Shared utilities and libraries
 │   ├── config.py            # Configuration management
 │   ├── initializer.py       # Service initialization

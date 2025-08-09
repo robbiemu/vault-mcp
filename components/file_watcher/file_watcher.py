@@ -13,6 +13,7 @@ from llama_index.core.node_parser import (
     MarkdownNodeParser,
     TokenTextSplitter,
 )
+from llama_index.core.schema import Document
 from shared.config import Config
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -177,7 +178,7 @@ class VaultEventHandler(FileSystemEventHandler):
                 )
                 return []
 
-            # Stage 2: Size-based splitting
+            # Stage 2: Size-based splitting while preserving indices
             logger.info(
                 "Stage 2: Splitting nodes based on token-based size constraints."
             )
@@ -186,39 +187,30 @@ class VaultEventHandler(FileSystemEventHandler):
                 chunk_overlap=self.config.indexing.chunk_overlap,
             )
 
-            # Split nodes while preserving original character positions
             final_nodes = []
+
             for node in initial_nodes:
-                # Get the original character position within the full document
-                original_start = getattr(node, "start_char_idx", 0)
+                # Get the original start index from the structurally-aware node.
+                original_start = getattr(node, "start_char_idx", 0) or 0
 
-                # Convert node to document for processing
-                from llama_index.core.schema import Document
+                # Create a temporary Document from the node's content.
+                doc = Document(text=node.get_content(), metadata=node.metadata)
 
-                doc = Document(
-                    text=node.get_content(),
-                    metadata=node.metadata if hasattr(node, "metadata") else {},
-                )
-
-                # Split the document using TokenTextSplitter
+                # Split this smaller document into sub-nodes.
                 split_nodes = size_splitter.get_nodes_from_documents([doc])
 
-                # Preserve original metadata and fix character positions
+                # Correct the indices of the new sub-nodes.
                 for split_node in split_nodes:
-                    if hasattr(node, "metadata"):
-                        split_node.metadata.update(node.metadata)
+                    split_start = getattr(split_node, "start_char_idx", 0) or 0
+                    split_end = getattr(split_node, "end_char_idx", 0) or 0
 
-                    # Fix character indices to be relative to the original document
-                    if (
-                        hasattr(split_node, "start_char_idx")
-                        and split_node.start_char_idx is not None
-                    ):
-                        split_node.start_char_idx += original_start
-                    if (
-                        hasattr(split_node, "end_char_idx")
-                        and split_node.end_char_idx is not None
-                    ):
-                        split_node.end_char_idx += original_start
+                    # Add the original offset to make indices relative to the full file.
+                    setattr(split_node, "start_char_idx", original_start + split_start)
+                    setattr(split_node, "end_char_idx", original_start + split_end)
+
+                    # Also update metadata for persistence.
+                    split_node.metadata["start_char_idx"] = getattr(split_node, "start_char_idx")
+                    split_node.metadata["end_char_idx"] = getattr(split_node, "end_char_idx")
 
                 final_nodes.extend(split_nodes)
 

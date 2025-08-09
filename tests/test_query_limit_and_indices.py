@@ -7,7 +7,7 @@ These tests specifically check for issues that were found in production:
 
 import tempfile
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from components.agentic_retriever.agentic_retriever import StaticContextPostprocessor
@@ -60,30 +60,34 @@ class TestQueryLimitHandling:
     @pytest.fixture
     def mock_query_engine(self):
         """Create a mock query engine that returns many results."""
-        mock_engine = Mock()
+        mock_engine = AsyncMock()
         mock_response = Mock()
 
         # Create 10 mock source nodes
         source_nodes = []
         for i in range(10):
-            node = Mock()
-            node.node = Mock(spec=TextNode)
-            node.node.get_content.return_value = f"Content {i + 1}"
-            node.node.metadata = {
-                "file_path": f"/test/file{i + 1}.md",
-                "start_char_idx": i * 100,
-                "end_char_idx": (i * 100) + 50,
-                "original_text": f"Original {i + 1}",
-            }
-            node.node.id_ = f"node_{i + 1}"
-            node.score = 0.9 - (i * 0.05)
-            source_nodes.append(node)
+            node = TextNode(
+                text=f"Content {i + 1}",
+                id_=f"node_{i + 1}",
+                metadata={
+                    "file_path": f"/test/file{i + 1}.md",
+                    "start_char_idx": i * 100,
+                    "end_char_idx": (i * 100) + 50,
+                    "original_text": f"Original {i + 1}",
+                },
+            )
+            # Set attributes for fallback in VaultService
+            setattr(node, "start_char_idx", i * 100)
+            setattr(node, "end_char_idx", (i * 100) + 50)
+
+            source_nodes.append(NodeWithScore(node=node, score=0.9 - (i * 0.05)))
 
         mock_response.source_nodes = source_nodes
-        mock_engine.query.return_value = mock_response
+        mock_engine.aquery.return_value = mock_response
         return mock_engine
 
-    def test_vector_store_fallback_respects_request_limit(
+    @pytest.mark.asyncio
+    async def test_vector_store_fallback_respects_request_limit(
         self, mock_config, mock_vector_store
     ):
         """Test that vector store fallback respects the request limit."""
@@ -93,7 +97,7 @@ class TestQueryLimitHandling:
         )
 
         # Test the search_chunks method directly
-        result_chunks = service.search_chunks("test", limit=3)
+        result_chunks = await service.search_chunks("test", limit=3)
 
         # Should have called search with limit=3
         mock_vector_store.search.assert_called_once_with(
@@ -102,7 +106,8 @@ class TestQueryLimitHandling:
             quality_threshold=mock_config.indexing.quality_threshold,
         )
 
-    def test_vector_store_fallback_uses_config_default_when_no_limit(
+    @pytest.mark.asyncio
+    async def test_vector_store_fallback_uses_config_default_when_no_limit(
         self, mock_config, mock_vector_store
     ):
         """Test that vector store fallback uses config default
@@ -113,7 +118,7 @@ class TestQueryLimitHandling:
         )
 
         # Test the search_chunks method with None limit
-        result_chunks = service.search_chunks("test", limit=None)
+        result_chunks = await service.search_chunks("test", limit=None)
 
         # Should have called search with config default limit
         mock_vector_store.search.assert_called_once_with(
@@ -122,7 +127,8 @@ class TestQueryLimitHandling:
             quality_threshold=mock_config.indexing.quality_threshold,
         )
 
-    def test_query_engine_respects_request_limit(self, mock_config, mock_query_engine):
+    @pytest.mark.asyncio
+    async def test_query_engine_respects_request_limit(self, mock_config, mock_query_engine):
         """Test that query engine response is limited to request limit."""
         # Create VaultService with query engine
         service = VaultService(
@@ -130,7 +136,7 @@ class TestQueryLimitHandling:
         )
 
         # Test the search_chunks method with limit=3
-        result_chunks = service.search_chunks("test", limit=3)
+        result_chunks = await service.search_chunks("test", limit=3)
 
         # Should only return 3 results despite query engine returning 10
         assert len(result_chunks) == 3
@@ -140,7 +146,8 @@ class TestQueryLimitHandling:
         assert result_chunks[1].text == "Content 2"
         assert result_chunks[2].text == "Content 3"
 
-    def test_query_engine_uses_config_default_when_no_limit(
+    @pytest.mark.asyncio
+    async def test_query_engine_uses_config_default_when_no_limit(
         self, mock_config, mock_query_engine
     ):
         """Test that query engine uses config default when no limit specified."""
@@ -150,18 +157,19 @@ class TestQueryLimitHandling:
         )
 
         # Test the search_chunks method with None limit
-        result_chunks = service.search_chunks("test", limit=None)
+        result_chunks = await service.search_chunks("test", limit=None)
 
         # Should return config default limit (5) results
         assert len(result_chunks) == 5
 
-    def test_error_fallback_respects_request_limit(
+    @pytest.mark.asyncio
+    async def test_error_fallback_respects_request_limit(
         self, mock_config, mock_vector_store
     ):
         """Test that error fallback respects the request limit."""
         # Mock query engine that raises an exception
         mock_failing_engine = Mock()
-        mock_failing_engine.query.side_effect = Exception("Query failed")
+        mock_failing_engine.aquery.side_effect = Exception("Query failed")
 
         # Create VaultService with failing query engine
         service = VaultService(
@@ -171,7 +179,7 @@ class TestQueryLimitHandling:
         )
 
         # Test the search_chunks method with limit=2
-        result_chunks = service.search_chunks("test", limit=2)
+        result_chunks = await service.search_chunks("test", limit=2)
 
         # Should have fallen back to vector store with correct limit
         mock_vector_store.search.assert_called_once_with(
@@ -299,7 +307,8 @@ Different section with completely different content.
         assert result[0].node.id_ == "test1"
         assert result[0].node.text == "This is some content"
 
-    def test_query_documents_returns_valid_indices(self):
+    @pytest.mark.asyncio
+    async def test_query_documents_returns_valid_indices(self):
         """Test that query_documents returns results with valid character indices."""
         # Mock a complete setup
         mock_config = Config(
@@ -322,24 +331,28 @@ Different section with completely different content.
         mock_node.score = 0.9
 
         # Also set as node attributes for fallback
-        mock_node.node.start_char_idx = 100
-        mock_node.node.end_char_idx = 150
+        setattr(mock_node.node, "start_char_idx", 100)
+        setattr(mock_node.node, "end_char_idx", 150)
 
         mock_response = Mock()
         mock_response.source_nodes = [mock_node]
 
-        mock_query_engine = Mock()
-        mock_query_engine.query.return_value = mock_response
+        mock_query_engine = AsyncMock()
+        mock_query_engine.aquery.return_value = mock_response
+
+        # Mock the vector store for fallback
+        mock_vector_store = Mock(spec=VectorStore)
+        mock_vector_store.search.return_value = []
 
         request = QueryRequest(query="test", limit=1)
 
         # Create VaultService with query engine
         service = VaultService(
-            config=mock_config, vector_store=Mock(), query_engine=mock_query_engine
+            config=mock_config, vector_store=mock_vector_store, query_engine=mock_query_engine
         )
 
         # Test the search_chunks method
-        result_chunks = service.search_chunks(request.query, limit=request.limit)
+        result_chunks = await service.search_chunks(request.query, limit=request.limit)
 
         # Should return one result with valid indices
         assert len(result_chunks) == 1
@@ -351,7 +364,8 @@ Different section with completely different content.
         assert result.start_char_idx == 100
         assert result.end_char_idx == 150
 
-    def test_query_documents_handles_none_indices_gracefully(self):
+    @pytest.mark.asyncio
+    async def test_query_documents_handles_none_indices_gracefully(self):
         """Test that query_documents handles None indices without crashing."""
         mock_config = Config(
             paths=PathsConfig(vault_dir="/test"),
@@ -373,24 +387,28 @@ Different section with completely different content.
         mock_node.score = 0.9
 
         # Node attributes are also None
-        mock_node.node.start_char_idx = None
-        mock_node.node.end_char_idx = None
+        setattr(mock_node.node, "start_char_idx", None)
+        setattr(mock_node.node, "end_char_idx", None)
 
         mock_response = Mock()
         mock_response.source_nodes = [mock_node]
 
-        mock_query_engine = Mock()
-        mock_query_engine.query.return_value = mock_response
+        mock_query_engine = AsyncMock()
+        mock_query_engine.aquery.return_value = mock_response
+
+        # Mock the vector store for fallback
+        mock_vector_store = Mock(spec=VectorStore)
+        mock_vector_store.search.return_value = []
 
         request = QueryRequest(query="test", limit=1)
 
         # Create VaultService with query engine
         service = VaultService(
-            config=mock_config, vector_store=Mock(), query_engine=mock_query_engine
+            config=mock_config, vector_store=mock_vector_store, query_engine=mock_query_engine
         )
 
         # Test the search_chunks method
-        result_chunks = service.search_chunks(request.query, limit=request.limit)
+        result_chunks = await service.search_chunks(request.query, limit=request.limit)
 
         # Should not crash and should convert None to 0
         assert len(result_chunks) == 1

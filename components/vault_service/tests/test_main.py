@@ -1,7 +1,7 @@
 """Tests for VaultService main functionality."""
 
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -9,6 +9,7 @@ import pytest
 from components.vault_service.main import DocumentLoaderError, VaultService
 from components.vault_service.models import ChunkMetadata
 from components.vector_store.vector_store import VectorStore
+from llama_index.core.schema import TextNode
 from shared.config import (
     Config,
     IndexingConfig,
@@ -117,26 +118,29 @@ class TestVaultService:
         with pytest.raises(FileNotFoundError, match="Document not found in index"):
             vault_service.get_document_content("/nonexistent/file.md")
 
-    def test_search_chunks_with_vector_store_fallback(
+    @pytest.mark.asyncio
+    async def test_search_chunks_with_vector_store_fallback(
         self, vault_service, mock_vector_store
     ):
         """Test search_chunks when using vector store fallback."""
-        results = vault_service.search_chunks("test query", limit=2)
+        results = await vault_service.search_chunks("test query", limit=2)
         assert len(results) == 2
         mock_vector_store.search.assert_called_once_with(
             "test query", limit=2, quality_threshold=0.3
         )
 
-    def test_search_chunks_uses_default_limit(self, vault_service, mock_vector_store):
+    @pytest.mark.asyncio
+    async def test_search_chunks_uses_default_limit(self, vault_service, mock_vector_store):
         """Test search_chunks uses config default when no limit specified."""
-        vault_service.search_chunks("test query", limit=None)
+        await vault_service.search_chunks("test query", limit=None)
         mock_vector_store.search.assert_called_once_with(
             "test query", limit=5, quality_threshold=0.3
         )
 
-    def test_search_chunks_with_query_engine(self, test_config, mock_vector_store):
+    @pytest.mark.asyncio
+    async def test_search_chunks_with_query_engine(self, test_config, mock_vector_store):
         """Test search_chunks when query engine is available."""
-        mock_query_engine = Mock()
+        mock_query_engine = AsyncMock()
         mock_response = Mock()
         mock_node = Mock()
         mock_node.node.get_content.return_value = "Engine result"
@@ -149,29 +153,30 @@ class TestVaultService:
         mock_node.node.id_ = "engine_node_1"
         mock_node.score = 0.95
         mock_response.source_nodes = [mock_node]
-        mock_query_engine.query.return_value = mock_response
+        mock_query_engine.aquery.return_value = mock_response
         service = VaultService(
             config=test_config,
             vector_store=mock_vector_store,
             query_engine=mock_query_engine,
         )
-        results = service.search_chunks("test query", limit=1)
+        results = await service.search_chunks("test query", limit=1)
         assert len(results) == 1
         assert results[0].text == "Engine result"
-        mock_query_engine.query.assert_called_once_with("test query")
+        mock_query_engine.aquery.assert_called_once_with("test query")
 
-    def test_search_chunks_query_engine_fallback_on_error(
+    @pytest.mark.asyncio
+    async def test_search_chunks_query_engine_fallback_on_error(
         self, test_config, mock_vector_store
     ):
         """Test search_chunks falls back to vector store when query engine fails."""
-        mock_query_engine = Mock()
-        mock_query_engine.query.side_effect = Exception("Query engine error")
+        mock_query_engine = AsyncMock()
+        mock_query_engine.aquery.side_effect = Exception("Query engine error")
         service = VaultService(
             config=test_config,
             vector_store=mock_vector_store,
             query_engine=mock_query_engine,
         )
-        results = service.search_chunks("test query", limit=2)
+        results = await service.search_chunks("test query", limit=2)
         assert len(results) == 2
         mock_vector_store.search.assert_called_once_with(
             "test query", limit=2, quality_threshold=0.3
@@ -238,9 +243,14 @@ class TestVaultService:
         updated_file.write_text("dummy content")
 
         mock_documents = [Mock()]
-        mock_nodes = [Mock()]
+        mock_nodes = [Mock(spec=TextNode)]
         mock_nodes[0].get_content.return_value = "Test content"
-        mock_nodes[0].metadata = {}
+        setattr(mock_nodes[0], "start_char_idx", 0)
+        setattr(mock_nodes[0], "end_char_idx", 0)
+        mock_nodes[0].metadata = {
+            "start_char_idx": 0,
+            "end_char_idx": 0
+        }
 
         # Configure mock return values
         mock_load_docs.return_value = mock_documents

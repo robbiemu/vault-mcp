@@ -89,7 +89,7 @@ class VaultService:
             content = f.read()
         return content
 
-    def search_chunks(self, query: str, limit: int | None) -> List[ChunkMetadata]:
+    async def search_chunks(self, query: str, limit: int | None) -> List[ChunkMetadata]:
         """
         Performs a semantic search for relevant document chunks.
 
@@ -117,7 +117,8 @@ class VaultService:
 
         try:
             logger.info(f"Performing RAG query for: '{query}'")
-            response = self.query_engine.query(query)
+            # Use the asynchronous 'aquery' method instead of 'query'
+            response = await self.query_engine.aquery(query)
 
             sources = []
             if hasattr(response, "source_nodes"):
@@ -139,7 +140,10 @@ class VaultService:
             return sources
 
         except Exception as e:
-            logger.error(f"Error during RAG query, falling back to basic search: {e}")
+            logger.error(
+                f"Error during RAG query, falling back to basic search: {e}",
+                exc_info=True,
+            )
             return self.vector_store.search(
                 query,
                 limit=final_limit,
@@ -268,21 +272,54 @@ class VaultService:
                 )
                 logger.debug(f"load_documents returned {len(documents)} documents")
                 if documents:
-                    # Two-stage parsing: structural then size-based
+                    # Stage 1: Structural parsing
                     initial_nodes = self.node_parser.get_nodes_from_documents(documents)
+
+                    # Stage 2: Size-based splitting while preserving indices
+                    # This block correctly preserves character indices across
+                    #  both stages.
                     size_splitter = SentenceSplitter(
                         chunk_size=self.config.indexing.chunk_size,
                         chunk_overlap=self.config.indexing.chunk_overlap,
                     )
-                    # Convert nodes to documents for the size splitter, preserving
-                    #  metadata
+
+                    final_nodes = []
                     from llama_index.core import Document
 
-                    node_documents = [
-                        Document(text=node.get_content(), metadata=node.metadata)
-                        for node in initial_nodes
-                    ]
-                    final_nodes = size_splitter.get_nodes_from_documents(node_documents)
+                    for node in initial_nodes:
+                        # Get the original start index from the structurally-aware node.
+                        # This is the crucial offset we need to preserve.
+                        original_start = getattr(node, "start_char_idx", 0) or 0
+
+                        # Create a temporary Document from the node's content to feed
+                        #  to the splitter.
+                        doc = Document(text=node.get_content(), metadata=node.metadata)
+
+                        # Split this smaller document into sub-nodes.
+                        split_nodes = size_splitter.get_nodes_from_documents([doc])
+
+                        # Correct the indices of the new sub-nodes.
+                        for split_node in split_nodes:
+                            # The splitter gives indices relative to the small doc's
+                            #  content.
+                            # We add the original offset to make them relative to the
+                            # full, original file.
+                            split_start = getattr(split_node, "start_char_idx", 0) or 0
+                            split_end = getattr(split_node, "end_char_idx", 0) or 0
+
+                            setattr(split_node, "start_char_idx", original_start + split_start)
+                            setattr(split_node, "end_char_idx", original_start + split_end)
+
+                            # Also update the metadata dictionary to ensure indices are
+                            # persisted.
+                            split_node.metadata["start_char_idx"] = (
+                                getattr(split_node, "start_char_idx")
+                            )
+                            split_node.metadata["end_char_idx"] = (
+                                getattr(split_node, "end_char_idx")
+                            )
+
+                        final_nodes.extend(split_nodes)
                     logger.debug(
                         f"Created {len(final_nodes)} final nodes after splitting."
                     )

@@ -84,9 +84,13 @@ watcher.stop()
 
 ### Integration with Server Lifecycle
 ```python
-# Automatic integration (from MCP server main.py)
+# Automatic integration (from vault_mcp/main.py)
 if config.watcher.enabled:
-file_watcher = VaultWatcher(config, loader, vector_store)
+    file_watcher = VaultWatcher(
+        config=config,
+        node_parser=service.node_parser,
+        vector_store=service.vector_store
+    )
     file_watcher.start()
     # Watcher runs in background until server shutdown
 ```

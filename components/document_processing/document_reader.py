@@ -253,7 +253,7 @@ class DocumentReader:
     def get_section_headers(
         self, file_path: str
     ) -> Tuple[str, List[Tuple[int, int, str]]]:
-        """Get all section headers in the document with their structure.
+        """Get all section headers in the document with their structure and byte ranges.
 
         Args:
             file_path: Path to the document file
@@ -270,14 +270,20 @@ class DocumentReader:
             if not headers:
                 return "No section headers found in document.", []
 
-            # Format headers in a readable structure
+            # Format headers in a readable structure, now including byte ranges
             formatted_lines = []
-            formatted_lines.append("Document Structure:")
-            formatted_lines.append("===================\n")
+            formatted_lines.append("Document Structure (with byte ranges):")
+            formatted_lines.append("=======================================\n")
 
-            for _pos, level, text in headers:
-                indent = "  " * (level - 1)  # Indent based on header level
-                formatted_lines.append(f"{indent}{'#' * level} {text}")
+            for i, (start_pos, level, text) in enumerate(headers):
+                # Determine the end position of this section
+                end_pos = headers[i + 1][0] if i + 1 < len(headers) else len(content)
+
+                indent = "  " * (level - 1)
+                # Add the byte range to the formatted output
+                formatted_lines.append(
+                    f"{indent}{'#' * level} {text}  (bytes: {start_pos}-{end_pos})"
+                )
 
             formatted_string = "\n".join(formatted_lines)
             return formatted_string, headers
@@ -288,85 +294,4 @@ class DocumentReader:
             return error_msg, []
 
 
-class FullDocumentRetrievalTool:
-    """Tool to retrieve full document content."""
 
-    def __init__(self) -> None:
-        self.reader = DocumentReader()
-
-    def retrieve_full_document(self, file_path: str) -> str:
-        """Retrieve entire document content.
-
-        WARNING: This can return a large amount of text and should be used as a
-        last resort when more targeted methods are insufficient.
-
-        Args:
-            file_path: Path to the file
-
-        Returns:
-            Entire content of the document
-        """
-        return str(self.reader.read_full_document(file_path))
-
-
-class SectionRetrievalTool:
-    """Tool to retrieve sections of a document based on character ranges."""
-
-    def __init__(self) -> None:
-        self.reader = DocumentReader()
-
-    def get_enclosing_sections(
-        self, file_path: str, start_char_idx: int, end_char_idx: int
-    ) -> str:
-        """Get the full sections that enclose the given character range.
-
-        This is the primary tool for targeted context around a RAG search.
-
-        Args:
-            file_path: Path to the file
-            start_char_idx: Start character index of the target range
-            end_char_idx: End character index of the target range
-
-        Returns:
-            Content of the section(s) that enclose the character range
-        """
-        content, _, _ = self.reader.get_enclosing_sections(
-            file_path, start_char_idx, end_char_idx
-        )
-        return str(content)
-
-    def get_section_headers(self, file_path: str) -> str:
-        """Get all section headers in the document.
-
-        This provides an overview of the document structure to help agents
-        understand the content organization.
-
-        Args:
-            file_path: Path to the file
-
-        Returns:
-            Formatted list of all section headers with their levels
-        """
-        headers_info, _ = self.reader.get_section_headers(file_path)
-        return str(headers_info)
-
-
-class SectionHeadersTool:
-    """Tool to retrieve document section headers for structure overview."""
-
-    def __init__(self) -> None:
-        self.reader = DocumentReader()
-
-    def get_section_headers(self, file_path: str) -> str:
-        """Get all section headers in the document.
-
-        This provides an overview of the document structure to help agents
-        understand the content organization and navigate effectively.
-
-        Args:
-            file_path: Path to the file
-
-        Returns:
-            Formatted list of all section headers with their hierarchical structure
-        """
-        return self.reader.get_section_headers(file_path)[0]

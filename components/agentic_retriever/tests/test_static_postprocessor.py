@@ -31,18 +31,24 @@ Even more specific content here.
         # Create mock nodes
         node1 = TextNode(
             text="This is the main content",
-            metadata={"file_path": temp_file, "title": "Test Document"},
+            metadata={
+                "file_path": temp_file,
+                "title": "Test Document",
+                "start_char_idx": 16,
+                "end_char_idx": 50,
+            },
             id_="test1",
-            start_char_idx=16,  # Starting at "This is the main"
-            end_char_idx=50,  # Ending within the main section
         )
 
         node2 = TextNode(
             text="This is a subsection",
-            metadata={"file_path": temp_file, "title": "Test Document"},
+            metadata={
+                "file_path": temp_file,
+                "title": "Test Document",
+                "start_char_idx": 75,
+                "end_char_idx": 100,
+            },
             id_="test2",
-            start_char_idx=75,  # Starting at "This is a subsection"
-            end_char_idx=100,  # Ending within the subsection
         )
 
         nodes_with_score = [
@@ -93,26 +99,35 @@ Different section with different content.
         # Create multiple nodes from the same section
         node1 = TextNode(
             text="Content of section A",
-            metadata={"file_path": temp_file, "title": "Test Document"},
+            metadata={
+                "file_path": temp_file,
+                "title": "Test Document",
+                "start_char_idx": 14,
+                "end_char_idx": 35,
+            },
             id_="test1",
-            start_char_idx=14,  # Within Section A
-            end_char_idx=35,
         )
 
         node2 = TextNode(
             text="More content in the same",
-            metadata={"file_path": temp_file, "title": "Test Document"},
+            metadata={
+                "file_path": temp_file,
+                "title": "Test Document",
+                "start_char_idx": 50,
+                "end_char_idx": 75,
+            },
             id_="test2",
-            start_char_idx=50,  # Also within Section A
-            end_char_idx=75,
         )
 
         node3 = TextNode(
             text="Different section with",
-            metadata={"file_path": temp_file, "title": "Test Document"},
+            metadata={
+                "file_path": temp_file,
+                "title": "Test Document",
+                "start_char_idx": 130,
+                "end_char_idx": 155,
+            },
             id_="test3",
-            start_char_idx=130,  # Within Section B
-            end_char_idx=155,
         )
 
         nodes_with_score = [

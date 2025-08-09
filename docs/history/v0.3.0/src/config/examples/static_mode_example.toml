@@ -1,0 +1,40 @@
+# Example configuration for static mode (no LLM required)
+# This configuration demonstrates how to run the server in static mode
+# where chunks are expanded to their full section context without LLM rewriting
+
+[paths]
+vault_dir = "/path/to/your/obsidian-vault"
+database_dir = "./chroma_db"
+type = "Obsidian"
+
+[prefix_filter]
+allowed_prefixes = [
+  "Project Documentation",
+  "Meeting Notes",
+  "Research"
+]
+
+[indexing]
+chunk_size = 512
+chunk_overlap = 64
+quality_threshold = 0.75
+enable_quality_filter = false
+
+[watcher]
+enabled = true
+debounce_seconds = 2
+
+[server]
+host = "127.0.0.1"
+port = 8000
+
+[embedding_model]
+provider = "sentence_transformers"
+model_name = "all-MiniLM-L6-v2"
+
+[retrieval]
+# Static mode: expand chunks to full section context (fast, deterministic)
+mode = "static"
+
+# Note: [generation_model] section is NOT required for static mode
+# The server will start successfully without any LLM configuration

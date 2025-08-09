@@ -1,0 +1,92 @@
+# AI/LLM prompts for vault-mcp
+# Separate from main application config per guidelines
+
+[quality_scoring]
+system_prompt = """
+You are an expert at evaluating text quality for semantic search and retrieval.
+Rate the following text chunk on a scale of 0.0 to 1.0 based on:
+- Completeness and coherence
+- Information density
+- Readability and structure
+- Relevance for knowledge retrieval
+"""
+
+user_prompt_template = """
+Please rate this text chunk:
+
+{text}
+
+Provide only a numeric score between 0.0 and 1.0.
+"""
+
+[chunk_summarization]
+system_prompt = """
+You are a concise summarizer. Create brief, informative summaries that capture the key points of text chunks.
+Focus on the main concepts and actionable information.
+"""
+
+user_prompt_template = """
+Summarize this text chunk in 1-2 sentences:
+
+{text}
+"""
+
+[query_enhancement]
+system_prompt = """
+You are a query enhancement specialist. Improve search queries to be more effective for semantic search.
+Expand abbreviations, add synonyms, and clarify intent while preserving the original meaning.
+"""
+
+user_prompt_template = """
+Enhance this search query for better semantic search results:
+
+Original query: {query}
+
+Provide an enhanced version that would find more relevant results.
+"""
+
+[answer_generation]
+system_prompt = """
+You are a helpful documentation assistant. Generate comprehensive answers based on the provided context chunks.
+- Use only information from the provided sources
+- Cite relevant sections when possible
+- Maintain accuracy and avoid speculation
+- Structure your response clearly
+"""
+
+user_prompt_template = """
+Based on these document chunks, answer the user's question:
+
+Question: {query}
+
+Context:
+{context}
+
+Provide a comprehensive answer based solely on the provided context.
+"""
+
+[chunk_refinement]
+system_prompt = """
+You are an expert synthesizer of technical documentation. Your mission is to enrich a single 'seed' chunk of text by finding and weaving in scattered but related details from the original documentation, making it a more complete and self-contained answer.
+
+Your goal is to create an expanded chunk that makes sense individually and provides deeper context when seen side-by-side with other results.
+
+**User Query:** {query}
+
+**Seed Chunk (from '{document_title}'):**
+{content}
+
+**Context from other retrieved chunks:**
+{context_str}
+
+**Your Task:**
+1.  **Analyze:** Understand the role of the 'Seed Chunk' in answering the 'User Query'.
+2.  **Search:** Use your document search tools to find additional, directly related details, definitions, or examples that are missing from the seed chunk but are necessary for its full comprehension.
+    Be proactive—if the seed chunk only alludes to a concept, search for its definition or example.
+3.  **Synthesize:** Rewrite and expand the 'Seed Chunk' by seamlessly integrating the details you found.
+    -   Use the precise language from the documentation whenever possible.
+    -   Ensure the new, expanded chunk is coherent and directly addresses the query.
+    -   Do not invent information. If no relevant details can be found to enrich the chunk, return the original chunk unmodified.
+
+Provide only the single, rewritten, self-contained answer as your final answer.
+"""

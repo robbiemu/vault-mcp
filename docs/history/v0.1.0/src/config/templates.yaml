@@ -1,0 +1,45 @@
+# Template configurations for vault-mcp
+# Separate from main application config per guidelines
+
+# Response templates for different query types
+response_templates:
+  search_result: |
+    Based on the indexed documents, here's what I found:
+    {answer}
+
+    Sources:
+    {sources}
+
+  no_results: |
+    No relevant documents found for your query: "{query}"
+
+    Suggestions:
+    - Try different keywords
+    - Check if documents are properly indexed
+    - Lower the quality threshold if needed
+
+  error_response: |
+    An error occurred while processing your request: {error}
+
+    Please try again or contact support if the issue persists.
+
+# Document processing templates
+processing_templates:
+  chunk_header: |
+    Document: {file_path}
+    Chunk {chunk_index} (Score: {score:.2f})
+    ---
+
+  index_summary: |
+    Indexing Summary:
+    - Files processed: {files_processed}
+    - Total chunks: {total_chunks}
+    - Average quality score: {avg_score:.2f}
+
+# API endpoint descriptions
+endpoint_descriptions:
+  info: "Provide server capabilities and configuration information"
+  files: "List all currently indexed files in the vault"
+  document: "Retrieve the full content of a specific document"
+  query: "Perform semantic search across indexed documents"
+  reindex: "Force a complete re-indexing of the vault"

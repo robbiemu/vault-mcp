@@ -4,17 +4,13 @@ This document analyzes the changes introduced in version `v0.3.0` of the Vault M
 
 ## 1. State of the Project
 
-Version `v0.3.0` marks the maturation of the project from a promising platform into a powerful and flexible RAG server. It introduces a completely new document processing pipeline, adds support for multiple document sources, and, most importantly, makes the RAG pipeline fully configurable and functional.
+The long-promised agentic RAG finally runs end-to-end. It introduces a completely new document processing pipeline, adds support for multiple document sources, and, most importantly, makes the RAG pipeline fully configurable and functional.
 
 The key changes in this version are:
-- **New Document Processing Pipeline:** The old `DocumentProcessor` has been replaced with a more sophisticated, multi-stage pipeline built on LlamaIndex primitives. This includes:
-    - **Multi-Source Document Loading:** The server can now ingest documents from standard Markdown folders, Obsidian vaults, and Joplin notebooks.
-    - **Structure-Aware Parsing:** It now uses LlamaIndex's `MarkdownNodeParser` to better preserve document structure and metadata.
-    - **Improved Quality Scoring:** The quality scoring logic is now in its own `ChunkQualityScorer` class with a revised heuristic.
-- **Configurable Retrieval Modes:** This is the flagship feature of this release. Users can now choose between two retrieval modes in `config.toml`:
-    - **`agentic` mode:** This mode uses the `ChunkRewriterPostprocessor`, which is now **fully implemented**. It leverages an LLM to rewrite and enrich the retrieved chunks for higher quality and relevance.
-    - **`static` mode:** This new mode provides a fast, deterministic alternative that does not require an LLM. It uses a `StaticContextPostprocessor` to expand the retrieved chunks to their full section context, providing more information without the overhead of an LLM call.
-- **Full Implementation of Agentic Rewriting:** The `ChunkRewriteAgent` is no longer a stub. It now actively uses an LLM to rewrite chunks, finally delivering on the "Retrieve-and-Refine" promise.
+- Brand-new **ingestion pipeline**: multi-source loaders (Obsidian, Joplin, vanilla Markdown), structure-aware Markdown parsing, and a dedicated ChunkQualityScorer.
+- Two *retrieval modes* in config.toml:
+  - *agentic*: LLM rewrites each retrieved chunk for clarity and relevance (no longer a stub!)
+  - *static*: fast, deterministic context expansion without any LLM calls.
 - **Extensive Documentation:** The `README.md` and other documentation files have been overhauled to reflect the new features, architecture, and configuration options.
 
 ## 2. What it Was Doing Right

@@ -31,8 +31,8 @@ The project structure is well-organized from the beginning, with a clear separat
 
 ## 3. What it Was Doing Wrong (or Could Be Improved)
 
-- **Simplistic RAG Implementation:** The biggest weakness of this version is its rudimentary RAG (Retrieval-Augmented Generation) implementation. The `/mcp/query` endpoint simply returns the most relevant retrieved chunk as the "answer". It does not perform any generation to synthesize a coherent response from the retrieved context.
-- **Heuristic-Based Quality Scoring:** The quality scoring for chunks is based on a set of simple heuristics. While a good starting point, this approach is not very robust.
+- **Simplistic RAG Implementation:** What’s missing is the “G” in RAG: the /mcp/query endpoint simply returns the best chunk verbatim—no LLM synthesis yet.
+
 
 ## 4. What it Was Lacking
 

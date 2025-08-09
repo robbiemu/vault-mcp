@@ -20,7 +20,7 @@ The key changes in this version are:
 - **Excellent Architecture:** The new dual-server architecture with a centralized `VaultService` is a major improvement. It follows the "separation of concerns" principle, making the codebase much cleaner, more modular, and easier to maintain and test.
 - **High Extensibility:** The pluggable embedding system is a powerful feature that allows users to easily extend the application with new and custom embedding models without modifying the core code.
 - **Robust Initialization:** The centralized initializer ensures that all components are created and configured in a consistent and predictable way, which improves the overall robustness of the application.
-- **Superb Documentation:** The addition of dedicated `CONFIGURATION.md` and `CONTRIBUTING.md` files, along with the updated `README.md`, makes the project very accessible to both users and new developers.
+- **Superb Documentation:** Configuration and contributor guides are now standalone files, and the README sports a fresh architecture diagram.
 
 ## 3. What it Was Doing Wrong (or Could Be Improved)
 

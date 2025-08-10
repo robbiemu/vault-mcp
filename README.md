@@ -2,7 +2,7 @@
 
 **Version 0.4.0**
 
-A **Model Context Protocol (MCP)** compliant server that indexes, searches, and serves documents from multiple sources with **semantic search (RAG)**, **live synchronization**, **configurable post-processing**, and **quality-based chunk filtering**.
+A **Model Context Protocol (MCP)** compliant server that indexes, searches, and serves documents from multiple sources (Obsidian, Joplin, collections of markdown) with **semantic search (RAG)**, **live synchronization**, **configurable post-processing**, and **quality-based chunk filtering**.
 
 ## ✨ Features
 
@@ -363,3 +363,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - [LiteLLM](https://docs.litellm.ai/) for unified LLM access
 - [Sentence Transformers](https://www.sbert.net/) for embedding generation
 - [Watchdog](https://github.com/gorakhargosh/watchdog) for file system monitoring
+- [PyMerkle](https://github.com/fmerg/pymerkle) for fine-grained file tracking.

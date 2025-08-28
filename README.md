@@ -1,10 +1,16 @@
 # 🧾 Vault MCP - Obsidian Documentation Server
 
+![vault-mcp avatar: A friendly, cartoon capybara wearing a green librarian's visor, is shown behind a counter, looking out from a vault built into a wall of bookshelves. The capybara has its hands on a stack of colorful books. The style is a simplified, cute anime style with clean lines and a warm color palette.](docs/.assets/Gemini_Generated_Image_3uqaf63uqaf63uqa.png)
+
 **Version 0.4.0**
 
 A **Model Context Protocol (MCP)** compliant server that indexes, searches, and serves documents from multiple sources (Obsidian, Joplin, collections of markdown) with **semantic search (RAG)**, **live synchronization**, **configurable post-processing**, and **quality-based chunk filtering**.
 
-![vault-mcp avatar: A friendly, cartoon capybara wearing a green librarian's visor, is shown behind a counter, looking out from a vault built into a wall of bookshelves. The capybara has its hands on a stack of colorful books. The style is a simplified, cute anime style with clean lines and a warm color palette.](docs/.assets/Gemini_Generated_Image_3uqaf63uqaf63uqa.png)
+<div style="align:center">
+
+https://github.com/user-attachments/assets/4ee2dbdd-3358-4b73-878a-c15e63cabe7c
+
+</div>
 
 ## ✨ Features
 

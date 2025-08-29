@@ -1,6 +1,8 @@
 # 🧾 Vault MCP - Obsidian Documentation Server
 
-![vault-mcp avatar: A friendly, cartoon capybara wearing a green librarian's visor, is shown behind a counter, looking out from a vault built into a wall of bookshelves. The capybara has its hands on a stack of colorful books. The style is a simplified, cute anime style with clean lines and a warm color palette.](docs/.assets/Gemini_Generated_Image_3uqaf63uqaf63uqa.png)
+<div align="center">
+    <img src="docs/.assets/Gemini_Generated_Image_3uqaf63uqaf63uqa.png" alt="A friendly, cartoon capybara wearing a green librarian's visor, is shown behind a counter, looking out from a vault built into a wall of bookshelves. The capybara has its hands on a stack of colorful books. The style is a simplified, cute anime style with clean lines and a warm color palette." width="66%">
+</div>
 
 **Version 0.4.0**
 

@@ -31,6 +31,7 @@ The server loads configuration from `config/app.toml` by default. You can either
 ### Server Control
 - `--serve-api`: Run the standard API server (default: both servers)
 - `--serve-mcp`: Run the MCP-compliant server (default: both servers)
+- `--serve-mcp-stdio`: Run the MCP server over stdio for agent-managed launching
 - `--api-port`: Port for the API server (default: 8000)
 - `--mcp-port`: Port for the MCP server (default: 8081)
 - `--host`: Override the server host (default: from config)
@@ -48,6 +49,9 @@ vault-mcp --app-config ./configs/project_a_config.toml
 
 # Run only MCP server on custom port with custom database
 vault-mcp --serve-mcp --mcp-port 9000 --database-dir ./custom_db
+
+# Run MCP server over stdio for agents that manage the process
+vault-mcp --serve-mcp-stdio --database-dir ./custom_db
 
 # Run both servers with custom host
 vault-mcp --host 0.0.0.0 --api-port 8080 --mcp-port 8081

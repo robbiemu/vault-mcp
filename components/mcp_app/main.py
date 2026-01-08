@@ -2,6 +2,7 @@ from components.api_app.main import create_app as create_source_app
 from components.vault_service.main import VaultService
 from fastapi import FastAPI
 from fastapi_mcp import FastApiMCP  # type: ignore
+from mcp.server.lowlevel.server import Server
 
 
 def create_mcp_app(service: VaultService) -> FastAPI:
@@ -31,3 +32,22 @@ def create_mcp_app(service: VaultService) -> FastAPI:
     mcp.mount_http(mcp_app)
 
     return mcp_app
+
+
+def create_mcp_server(service: VaultService) -> Server:
+    """
+    Creates an MCP server instance for stdio transport.
+
+    Args:
+        service: The fully initialized VaultService instance.
+
+    Returns:
+        The configured MCP server.
+    """
+    source_app = create_source_app(service)
+    mcp = FastApiMCP(
+        source_app,
+        name="Vault MCP",
+        include_tags=["search", "documents"],
+    )
+    return mcp.server

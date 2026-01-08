@@ -51,6 +51,13 @@ class VectorStore:
                 f"Initialized embedding model: "
                 f"{embedding_config.provider}/{embedding_config.model_name}"
             )
+            
+            # Determine embedding dimension
+            # We generate a dummy embedding to determine the dimension
+            dummy_embedding = self.embedding_model.encode(["test_dimension_check"])[0]
+            self.embedding_dimension = len(dummy_embedding)
+            logger.debug(f"Detected embedding dimension: {self.embedding_dimension}")
+            
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}")
             raise
@@ -59,6 +66,25 @@ class VectorStore:
         try:
             self.collection = self.client.get_collection(name=self.collection_name)
             logger.info(f"Loaded existing collection: {self.collection_name}")
+            
+            # Check for dimension mismatch if collection is not empty
+            if self.collection.count() > 0:
+                result = self.collection.get(limit=1, include=["embeddings"])
+                if result["embeddings"] is not None and len(result["embeddings"]) > 0:
+                    existing_dim = len(result["embeddings"][0])
+                    if existing_dim != self.embedding_dimension:
+                        logger.warning(
+                            f"Dimension mismatch detected! Existing collection has dimension {existing_dim}, "
+                            f"but current model produces {self.embedding_dimension}. "
+                            f"Recreating collection '{self.collection_name}'..."
+                        )
+                        self.client.delete_collection(name=self.collection_name)
+                        self.collection = self.client.create_collection(
+                            name=self.collection_name,
+                            metadata={"description": "Obsidian vault document chunks"},
+                        )
+                        logger.info(f"Recreated collection: {self.collection_name}")
+                        
         except chromadb.errors.NotFoundError:
             # Collection doesn't exist, create it
             self.collection = self.client.create_collection(

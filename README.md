@@ -4,7 +4,7 @@
     <img src="docs/.assets/Gemini_Generated_Image_3uqaf63uqaf63uqa.png" alt="A friendly, cartoon capybara wearing a green librarian's visor, is shown behind a counter, looking out from a vault built into a wall of bookshelves. The capybara has its hands on a stack of colorful books. The style is a simplified, cute anime style with clean lines and a warm color palette." width="66%">
 </div>
 
-**Version 0.4.0**
+**Version 0.5.0**
 
 A **Model Context Protocol (MCP)** compliant server that indexes, searches, and serves documents from multiple sources (Obsidian, Joplin, collections of markdown) with **semantic search (RAG)**, **live synchronization**, **configurable post-processing**, and **quality-based chunk filtering**.
 
